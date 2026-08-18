@@ -1,12 +1,12 @@
 [project]
 name = "screenshare"
-version = "1.1.0"
-description = "Compartilhamento de tela ponto a ponto (1:1) com áudio e chat integrados"
+version = "1.2.0"
+description = "Compartilhamento de tela ponto a ponto com áudio, chat e modos TCP + WebRTC"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [{ name = "Moises M Santos" }]
-keywords = ["compartilhamento de tela", "screen sharing", "tkinter", "sockets", "python"]
+keywords = ["compartilhamento de tela", "screen sharing", "tkinter", "sockets", "webrtc", "python"]
 dependencies = [
     "mss>=9.0.1",
     "opencv-python>=4.8",
@@ -18,6 +18,7 @@ dependencies = [
 audio = ["sounddevice>=0.4.6"]
 # Alternativa para ambientes antigos, caso o PortAudio nao esteja disponivel.
 audio-legado = ["PyAudio>=0.2.13"]
+webrtc = ["aiortc>=1.9.0", "aiohttp>=3.9.0"]
 dev = ["pyinstaller>=6.0", "ruff>=0.6"]
 
 [project.scripts]

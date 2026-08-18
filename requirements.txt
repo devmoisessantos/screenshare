@@ -1,8 +1,6 @@
-# Dependências de execução do ScreenShare 1.0
+# Dependências de execução do ScreenShare
 #
-# As versões usam ">=" para permitir instalação em Python 3.9 até 3.14:
-# fixar versões exatas quebraria a instalação nas versões mais novas do
-# Python, que exigem rodas (wheels) mais recentes.
+# As versões usam ">=" para permitir instalação em Python 3.9 até 3.14.
 
 mss>=9.0.1
 opencv-python>=4.8
@@ -17,3 +15,9 @@ pillow>=10.0
 # Se o sounddevice não estiver presente, o projeto tenta o PyAudio
 # automaticamente; sem nenhum dos dois, roda apenas com vídeo e chat.
 sounddevice>=0.4.6
+
+# WebRTC (modo internet) — opcional nesta fase.
+# Instale para ativar o modo de conexão pela internet com NAT traversal.
+#   pip install aiortc aiohttp
+aiortc>=1.9.0
+aiohttp>=3.9.0

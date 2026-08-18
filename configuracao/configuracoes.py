@@ -24,7 +24,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 NOME_APLICACAO = "ScreenShare"
-VERSAO_APLICACAO = "1.1.0"
+VERSAO_APLICACAO = "1.2.0-dev"
 
 #: Resoluções suportadas para o compartilhamento de tela.
 RESOLUCOES: dict[str, tuple[int, int]] = {
@@ -118,6 +118,10 @@ class ConfiguracaoRede:
     tentativas_reconexao: int = 3
     intervalo_reconexao: float = 3.0
     tamanho_maximo_carga: int = TAMANHO_MAXIMO_CARGA
+    #: Modo de transporte preferido: "tcp" (local/VPN) ou "webrtc" (internet).
+    modo_transporte: str = "tcp"
+    #: URL de um servidor de sinalização WebRTC (vazio = ainda não configurado).
+    sinalizacao_url: str = ""
 
 
 @dataclass

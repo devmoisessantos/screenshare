@@ -3,6 +3,32 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 o projeto segue o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [1.2.0-dev] - 2026-08-18
+
+### Adicionado
+- **Camada de transporte** (`nucleo/transporte/`) preparada para dual mode:
+  TCP (local/VPN) + WebRTC (internet).
+- Módulo `utilitarios/convite.py`: geração e interpretação de convites
+  (`IP:porta`, `screenshare://...` e mensagem completa para WhatsApp/Discord).
+- **Gravação local de sessão** (`midia/gravacao/`): base do gravador com
+  OpenCV (VideoWriter), pasta de gravações e estados (parado/gravando).
+- Guia de conexão completo em `docs/CONEXAO.md` (rede local, Tailscale,
+  ZeroTier e roadmap WebRTC).
+- Dependência opcional `webrtc` no `pyproject.toml` (`aiortc` + `aiohttp`).
+- Texto de ajuda do host atualizado com instruções claras de Tailscale/ZeroTier
+  para conexão entre estados/países.
+- Botão "Copiar" do host agora copia o **convite completo** (endereço +
+  instruções anti-timed-out).
+- Campo de endereço do espectador aceita link `screenshare://` e extrai
+  senha automaticamente quando presente no convite.
+- Configuração `modo_transporte` e `sinalizacao_url` em `ConfiguracaoRede`.
+
+### Em andamento
+- Integração completa do modo WebRTC (sinalização + tracks de vídeo/áudio).
+- UI de seleção de modo (TCP / WebRTC / Tailscale).
+- Clipagem dos últimos minutos e botão de gravar na interface.
+- Controles e visual mais próximos do Discord.
+
 ## [1.1.0] - 2026-08-18
 
 ### Adicionado
