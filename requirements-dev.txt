@@ -1,0 +1,5 @@
+# Dependências de desenvolvimento (testes, qualidade e empacotamento)
+-r requirements.txt
+
+pyinstaller==6.10.0
+ruff==0.6.9
