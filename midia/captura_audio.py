@@ -1,4 +1,4 @@
-"""Captura e reprodução de áudio com PyAudio.
+"""Captura e reprodução de áudio com sounddevice.
 
 O módulo é tolerante à ausência da biblioteca ou de dispositivos de áudio:
 nesse caso a aplicação continua funcionando apenas com vídeo e chat.
@@ -10,20 +10,22 @@ import queue
 import threading
 from typing import Any
 
+import numpy as np
+
 from configuracao.configuracoes import ConfiguracaoAudio
 from utilitarios.registro import obter_registrador
 
 _registrador = obter_registrador(__name__)
 
 try:  # pragma: no cover - depende do ambiente
-    import pyaudio
+    import sounddevice as sd
 
     AUDIO_DISPONIVEL = True
 except Exception as _erro_importacao:  # pragma: no cover
-    pyaudio = None  # type: ignore[assignment]
+    sd = None  # type: ignore[assignment]
     AUDIO_DISPONIVEL = False
     _registrador.warning(
-        "PyAudio indisponível (%s); o áudio será desativado", _erro_importacao
+        "sounddevice indisponível (%s); o áudio será desativado", _erro_importacao
     )
 
 
@@ -31,11 +33,11 @@ class ErroAudio(Exception):
     """Falha ao abrir dispositivo de entrada ou saída de áudio."""
 
 
-def _formato_amostra() -> int:
+def _formato_amostra() -> str:
     """Formato de amostragem usado (16 bits inteiros com sinal)."""
     if not AUDIO_DISPONIVEL:
-        raise ErroAudio("PyAudio não está disponível")
-    return pyaudio.paInt16
+        raise ErroAudio("sounddevice não está disponível")
+    return "int16"
 
 
 def listar_dispositivos(entrada: bool = True) -> list[str]:
@@ -43,17 +45,14 @@ def listar_dispositivos(entrada: bool = True) -> list[str]:
     if not AUDIO_DISPONIVEL:
         return []
     descricoes: list[str] = []
-    instancia = pyaudio.PyAudio()
     try:
-        for indice in range(instancia.get_device_count()):
-            info: dict[str, Any] = instancia.get_device_info_by_index(indice)
-            canais = info.get(
-                "maxInputChannels" if entrada else "maxOutputChannels", 0
-            )
+        dispositivos = sd.query_devices()
+        for indice, info in enumerate(dispositivos):
+            canais = info.get("max_input_channels" if entrada else "max_output_channels", 0)
             if canais and int(canais) > 0:
                 descricoes.append(f"{indice} - {info.get('name')}")
-    finally:
-        instancia.terminate()
+    except Exception as erro:
+        _registrador.warning("Falha ao listar dispositivos: %s", erro)
     return descricoes
 
 
@@ -62,7 +61,6 @@ class CapturadorAudio:
 
     def __init__(self, configuracao: ConfiguracaoAudio) -> None:
         self.configuracao = configuracao
-        self._instancia: Any = None
         self._fluxo: Any = None
 
     @property
@@ -79,15 +77,14 @@ class CapturadorAudio:
         if not self.disponivel:
             raise ErroAudio("Captura de áudio desativada ou indisponível")
         try:
-            self._instancia = pyaudio.PyAudio()
-            self._fluxo = self._instancia.open(
-                format=_formato_amostra(),
+            self._fluxo = sd.InputStream(
+                samplerate=self.configuracao.taxa_amostragem,
                 channels=self.configuracao.canais,
-                rate=self.configuracao.taxa_amostragem,
-                input=True,
-                input_device_index=self.configuracao.dispositivo_entrada,
-                frames_per_buffer=self.configuracao.tamanho_bloco,
+                dtype=_formato_amostra(),
+                blocksize=self.configuracao.tamanho_bloco,
+                device=self.configuracao.dispositivo_entrada,
             )
+            self._fluxo.start()
         except Exception as erro:
             self.fechar()
             raise ErroAudio(f"Microfone indisponível: {erro}") from erro
@@ -102,27 +99,20 @@ class CapturadorAudio:
         if self._fluxo is None:
             raise ErroAudio("Fluxo de entrada não inicializado")
         try:
-            return self._fluxo.read(
-                self.configuracao.tamanho_bloco, exception_on_overflow=False
-            )
+            dados, _ = self._fluxo.read(self.configuracao.tamanho_bloco)
+            return dados.tobytes()
         except Exception as erro:
             raise ErroAudio(f"Falha na leitura do microfone: {erro}") from erro
 
     def fechar(self) -> None:
-        """Libera o fluxo e a instância do PyAudio."""
+        """Libera o fluxo de áudio."""
         if self._fluxo is not None:
             try:
-                self._fluxo.stop_stream()
+                self._fluxo.stop()
                 self._fluxo.close()
             except Exception:  # pragma: no cover
                 pass
             self._fluxo = None
-        if self._instancia is not None:
-            try:
-                self._instancia.terminate()
-            except Exception:  # pragma: no cover
-                pass
-            self._instancia = None
 
 
 class ReprodutorAudio:
@@ -136,7 +126,6 @@ class ReprodutorAudio:
     def __init__(self, configuracao: ConfiguracaoAudio, limite_fila: int = 24) -> None:
         self.configuracao = configuracao
         self._fila: queue.Queue[bytes] = queue.Queue(maxsize=limite_fila)
-        self._instancia: Any = None
         self._fluxo: Any = None
         self._thread: threading.Thread | None = None
         self._ativo = False
@@ -158,15 +147,14 @@ class ReprodutorAudio:
         if self._ativo:
             return
         try:
-            self._instancia = pyaudio.PyAudio()
-            self._fluxo = self._instancia.open(
-                format=_formato_amostra(),
+            self._fluxo = sd.OutputStream(
+                samplerate=self.configuracao.taxa_amostragem,
                 channels=self.configuracao.canais,
-                rate=self.configuracao.taxa_amostragem,
-                output=True,
-                output_device_index=self.configuracao.dispositivo_saida,
-                frames_per_buffer=self.configuracao.tamanho_bloco,
+                dtype=_formato_amostra(),
+                blocksize=self.configuracao.tamanho_bloco,
+                device=self.configuracao.dispositivo_saida,
             )
+            self._fluxo.start()
         except Exception as erro:
             self.parar()
             raise ErroAudio(f"Saída de áudio indisponível: {erro}") from erro
@@ -201,7 +189,8 @@ class ReprodutorAudio:
                 continue
             try:
                 if self._fluxo is not None:
-                    self._fluxo.write(bloco, exception_on_underflow=False)
+                    dados = np.frombuffer(bloco, dtype=np.int16)
+                    self._fluxo.write(dados)
             except Exception as erro:  # pragma: no cover
                 _registrador.warning("Falha ao reproduzir áudio: %s", erro)
                 break
@@ -214,14 +203,8 @@ class ReprodutorAudio:
         self._thread = None
         if self._fluxo is not None:
             try:
-                self._fluxo.stop_stream()
+                self._fluxo.stop()
                 self._fluxo.close()
             except Exception:  # pragma: no cover
                 pass
             self._fluxo = None
-        if self._instancia is not None:
-            try:
-                self._instancia.terminate()
-            except Exception:  # pragma: no cover
-                pass
-            self._instancia = None
