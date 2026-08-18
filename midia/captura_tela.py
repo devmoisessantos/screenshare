@@ -51,10 +51,21 @@ class CapturadorTela:
 
     A instância de ``mss`` é criada de forma preguiçosa e por thread, pois o
     objeto não é seguro para uso concorrente.
+
+    Args:
+        configuracao: parâmetros de vídeo (monitor e resolução).
+        dimensoes: largura e altura de saída que substituem a resolução da
+            configuração. Usado pela pré-visualização local, que precisa de uma
+            imagem menor sem alterar a configuração da transmissão.
     """
 
-    def __init__(self, configuracao: ConfiguracaoVideo) -> None:
+    def __init__(
+        self,
+        configuracao: ConfiguracaoVideo,
+        dimensoes: tuple[int, int] | None = None,
+    ) -> None:
         self.configuracao = configuracao
+        self.dimensoes = dimensoes
         self._captura: mss.base.MSSBase | None = None
         self._regiao: dict[str, int] | None = None
 
@@ -105,7 +116,7 @@ class CapturadorTela:
 
         # mss entrega BGRA; descartamos o canal alfa para reduzir dados.
         quadro = np.asarray(bruto, dtype=np.uint8)[:, :, :3]
-        largura, altura = self.configuracao.dimensoes
+        largura, altura = self.dimensoes or self.configuracao.dimensoes
         return redimensionar(quadro, largura, altura)
 
     def __enter__(self) -> CapturadorTela:

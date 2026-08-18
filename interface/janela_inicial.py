@@ -15,9 +15,9 @@ from configuracao.configuracoes import (
 from interface.janela_cliente import JanelaCliente
 from interface.janela_servidor import JanelaServidor
 from interface.tema import aplicar_tema
-from midia.captura_audio import AUDIO_DISPONIVEL
+from midia.captura_audio import descrever_motor_audio
 from utilitarios.recursos import aplicar_icone
-from utilitarios.rede import obter_ip_local
+from utilitarios.rede import ip_local_recomendado
 
 
 class JanelaInicial(tk.Tk):
@@ -104,8 +104,8 @@ class JanelaInicial(tk.Tk):
         informacoes.grid(row=2, column=0, sticky="ew")
         informacoes.columnconfigure(0, weight=1)
         texto = (
-            f"IP local: {obter_ip_local()}\n"
-            f"Áudio: {'disponível' if AUDIO_DISPONIVEL else 'indisponível (instale PyAudio)'}\n"
+            f"IP local: {ip_local_recomendado()}\n"
+            f"{descrever_motor_audio()}\n"
             f"Dados e logs: {diretorio_dados()}\n"
             "Atalhos: " + ", ".join(f"{tecla} = {acao}" for tecla, acao in ATALHOS.items())
         )

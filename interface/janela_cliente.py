@@ -13,16 +13,19 @@ from configuracao.configuracoes import (
     Configuracoes,
 )
 from interface.componentes import (
+    BarraControleAudio,
     PainelChat,
     PainelEstatisticas,
     PonteInterface,
     VisualizadorVideo,
 )
+from interface.janela_diagnostico import JanelaDiagnostico
 from interface.tema import aplicar_tema
-from midia.captura_audio import AUDIO_DISPONIVEL
+from midia.captura_audio import AUDIO_DISPONIVEL, descrever_motor_audio
 from midia.compressao import ErroCompressao, bgr_para_rgb, descomprimir_jpeg
 from nucleo.sessao import Retornos
 from utilitarios.recursos import aplicar_icone
+from utilitarios.rede import separar_endereco_porta
 from utilitarios.registro import obter_registrador
 
 _registrador = obter_registrador(__name__)
@@ -88,10 +91,10 @@ class JanelaCliente(tk.Toplevel):
         )
         self._botao_conectar.grid(row=0, column=6, rowspan=1, padx=(0, 8))
 
-        self._botao_microfone = ttk.Button(
-            barra, text="Mutar microfone", command=self._alternar_microfone, state="disabled"
+        self._botao_diagnostico = ttk.Button(
+            barra, text="Diagnóstico", command=self._abrir_diagnostico
         )
-        self._botao_microfone.grid(row=1, column=6, pady=(8, 0))
+        self._botao_diagnostico.grid(row=1, column=6, pady=(8, 0))
 
         self._var_status = tk.StringVar(value="Desconectado")
         ttk.Label(barra, textvariable=self._var_status, style="Secundario.TLabel").grid(
@@ -106,13 +109,26 @@ class JanelaCliente(tk.Toplevel):
         corpo.rowconfigure(0, weight=1)
         corpo.columnconfigure(0, weight=1)
         corpo.columnconfigure(1, minsize=340)
+        # A linha 1 recebe os controles de áudio, sem esticar.
 
         self._visualizador = VisualizadorVideo(corpo, self._paleta)
         self._visualizador.grid(row=0, column=0, sticky="nsew")
         self._visualizador.limpar("Conecte-se a um host para ver a tela compartilhada.")
 
+        self._controles_audio = BarraControleAudio(
+            corpo,
+            self._paleta,
+            ao_alternar_microfone=self._alternar_microfone,
+            ao_alternar_som=self._alternar_som,
+            disponivel=AUDIO_DISPONIVEL,
+            motivo_indisponivel=descrever_motor_audio(),
+        )
+        self._controles_audio.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        if AUDIO_DISPONIVEL:
+            self._controles_audio.definir_habilitado(False)
+
         self._chat = PainelChat(corpo, self._paleta, self._enviar_chat)
-        self._chat.grid(row=0, column=1, sticky="nsew", padx=(14, 0))
+        self._chat.grid(row=0, column=1, rowspan=2, sticky="nsew", padx=(14, 0))
         self._chat.definir_habilitado(False)
 
         # Estatísticas ------------------------------------------------------
@@ -123,7 +139,8 @@ class JanelaCliente(tk.Toplevel):
     def _registrar_atalhos(self) -> None:
         """Vincula os atalhos de teclado da janela."""
         self.bind("<Control-q>", lambda _e: self._ao_fechar())
-        self.bind("<Control-m>", lambda _e: self._alternar_microfone())
+        self.bind("<Control-m>", lambda _e: self._controles_audio.alternar_microfone())
+        self.bind("<Control-d>", lambda _e: self._controles_audio.alternar_som())
         self.bind("<Control-s>", lambda _e: self._alternar_conexao())
 
     # -- Conexão ------------------------------------------------------------
@@ -145,10 +162,12 @@ class JanelaCliente(tk.Toplevel):
             return
 
         # Aceita o formato "ip:porta" colado diretamente do host.
-        if ":" in endereco:
-            endereco, _, porta_colada = endereco.partition(":")
-            if porta_colada.strip().isdigit():
-                self._var_porta.set(porta_colada.strip())
+        try:
+            porta_atual = int(self._var_porta.get())
+        except ValueError:
+            porta_atual = self.configuracoes.rede.porta
+        endereco, porta_detectada = separar_endereco_porta(endereco, porta_atual)
+        self._var_porta.set(str(porta_detectada))
 
         self.configuracoes.interface.apelido = self._var_apelido.get().strip() or "Espectador"
         self.configuracoes.rede.senha = self._var_senha.get()
@@ -194,11 +213,24 @@ class JanelaCliente(tk.Toplevel):
             self._ponte.agendar(self._falha_conexao, str(erro))
 
     def _falha_conexao(self, mensagem: str) -> None:
-        """Mostra o erro de conexão e restaura os botões."""
+        """Mostra o erro de conexão, restaura os botões e oferece diagnóstico."""
         self._botao_conectar.configure(state="normal", text="Conectar")
         self._var_status.set("Falha na conexão")
         self._chat.adicionar_sistema(mensagem)
-        messagebox.showerror("Não foi possível conectar", mensagem, parent=self)
+        abrir = messagebox.askyesno(
+            "Não foi possível conectar",
+            f"{mensagem}\n\nDeseja abrir o diagnóstico de rede agora?",
+            parent=self,
+        )
+        if abrir:
+            self._abrir_diagnostico()
+
+    def _abrir_diagnostico(self) -> None:
+        """Abre a janela de diagnóstico já preenchida com o endereço digitado."""
+        endereco = self._var_endereco.get().strip()
+        if endereco and ":" not in endereco:
+            endereco = f"{endereco}:{self._var_porta.get()}"
+        JanelaDiagnostico(self, self.configuracoes, endereco)
 
     def _desconectar(self) -> None:
         """Encerra a sessão com o host."""
@@ -210,7 +242,9 @@ class JanelaCliente(tk.Toplevel):
     def _restaurar_estado_desconectado(self) -> None:
         """Devolve a interface ao estado inicial."""
         self._botao_conectar.configure(state="normal", text="Conectar", style="Destaque.TButton")
-        self._botao_microfone.configure(state="disabled", text="Mutar microfone")
+        if AUDIO_DISPONIVEL:
+            self._controles_audio.definir_habilitado(False)
+            self._controles_audio.definir_estado_remoto("")
         self._chat.definir_habilitado(False)
         self._visualizador.limpar("Sessão encerrada.")
         self._estatisticas.definir_texto("Sem conexão")
@@ -246,17 +280,25 @@ class JanelaCliente(tk.Toplevel):
                 self.configuracoes.interface.apelido, texto, proprio=True
             )
 
-    def _alternar_microfone(self) -> None:
-        """Ativa/desativa o envio do microfone durante a sessão."""
+    def _alternar_microfone(self) -> bool:
+        """Ativa/desativa o envio do microfone. Devolve o novo estado."""
         if self._cliente is None or self._cliente.sessao is None:
-            return
+            return True
         ativo = self._cliente.sessao.alternar_microfone()
-        self._botao_microfone.configure(
-            text="Mutar microfone" if ativo else "Ativar microfone"
-        )
         self._chat.adicionar_sistema(
             "Microfone ativado." if ativo else "Microfone silenciado."
         )
+        return ativo
+
+    def _alternar_som(self) -> bool:
+        """Ativa/desativa a reprodução do áudio recebido do host."""
+        if self._cliente is None or self._cliente.sessao is None:
+            return True
+        ativo = self._cliente.sessao.alternar_som()
+        self._chat.adicionar_sistema(
+            "Som ativado." if ativo else "Som desativado (nada será reproduzido)."
+        )
+        return ativo
 
     def _exibir_chat(self, dados: dict) -> None:
         """Exibe uma mensagem recebida do host."""
@@ -269,9 +311,13 @@ class JanelaCliente(tk.Toplevel):
     def _exibir_estado(self, dados: dict) -> None:
         """Exibe mudanças de estado informadas pelo host."""
         if "microfone" in dados:
-            estado = "ativou" if dados["microfone"] else "silenciou"
+            apelido = dados.get("apelido", "Host")
+            ativo = bool(dados["microfone"])
             self._chat.adicionar_sistema(
-                f"{dados.get('apelido', 'Host')} {estado} o microfone."
+                f"{apelido} {'ativou' if ativo else 'silenciou'} o microfone."
+            )
+            self._controles_audio.definir_estado_remoto(
+                f"{apelido}: microfone {'ligado' if ativo else 'mudo'}"
             )
 
     # -- Retornos das threads ----------------------------------------------
@@ -281,8 +327,13 @@ class JanelaCliente(tk.Toplevel):
         self._botao_conectar.configure(
             state="normal", text="Desconectar", style="Perigo.TButton"
         )
-        if AUDIO_DISPONIVEL and self.configuracoes.audio.ativo:
-            self._botao_microfone.configure(state="normal")
+        if AUDIO_DISPONIVEL:
+            self._controles_audio.definir_habilitado(True)
+            if self._cliente is not None and self._cliente.sessao is not None:
+                self._controles_audio.sincronizar(
+                    self._cliente.sessao.microfone_ativo,
+                    self._cliente.sessao.som_ativo,
+                )
         self._chat.definir_habilitado(True)
         self._chat.adicionar_sistema(
             f"Conectado a {informacoes.get('apelido', 'host')} - "

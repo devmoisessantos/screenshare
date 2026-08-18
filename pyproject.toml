@@ -1,6 +1,6 @@
 [project]
 name = "screenshare"
-version = "1.0.0"
+version = "1.1.0"
 description = "Compartilhamento de tela ponto a ponto (1:1) com áudio e chat integrados"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -15,7 +15,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-audio = ["PyAudio>=0.2.13"]
+audio = ["sounddevice>=0.4.6"]
+# Alternativa para ambientes antigos, caso o PortAudio nao esteja disponivel.
+audio-legado = ["PyAudio>=0.2.13"]
 dev = ["pyinstaller>=6.0", "ruff>=0.6"]
 
 [project.scripts]
@@ -29,7 +31,8 @@ exclude = [".venv", "build", "dist"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
 # Exceções amplas são intencionais nos módulos de mídia: bibliotecas nativas
-# (mss, PyAudio) lançam erros específicos de cada sistema operacional e a
+# (mss, sounddevice, PyAudio) lançam erros específicos de cada sistema
+# operacional e a
 # aplicação precisa degradar de forma elegante em vez de encerrar.
 # SIM105 (`contextlib.suppress`) fica desativado por legibilidade: em um projeto
 # didático o bloco `try/except` explícito comunica melhor a intenção.

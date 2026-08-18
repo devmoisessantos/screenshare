@@ -24,6 +24,11 @@ analise = Analysis(
         "mss.windows",
         "mss.linux",
         "mss.darwin",
+        # Motor de áudio preferencial e sua extensão nativa; o PyAudio segue
+        # listado apenas como alternativa opcional.
+        "sounddevice",
+        "_sounddevice",
+        "cffi",
         "pyaudio",
     ],
     hookspath=[],

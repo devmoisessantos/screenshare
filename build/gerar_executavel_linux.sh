@@ -20,7 +20,7 @@ source .venv/bin/activate
 echo "[3/5] Instalando dependências..."
 python -m pip install --upgrade pip >/dev/null
 if ! python -m pip install -r requirements.txt; then
-    echo "AVISO: falha ao instalar alguma dependência (provavelmente PyAudio)."
+    echo "AVISO: falha ao instalar alguma dependência (provavelmente o áudio)."
     echo "       Instale as bibliotecas do sistema com:"
     echo "       sudo apt install portaudio19-dev python3-tk"
     python -m pip install mss opencv-python numpy pillow

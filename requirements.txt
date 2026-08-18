@@ -1,9 +1,19 @@
 # Dependências de execução do ScreenShare 1.0
+#
+# As versões usam ">=" para permitir instalação em Python 3.9 até 3.14:
+# fixar versões exatas quebraria a instalação nas versões mais novas do
+# Python, que exigem rodas (wheels) mais recentes.
+
 mss>=9.0.1
-opencv-python>=4.10.0
-numpy>=1.26.0
-pillow>=11.0.0
+opencv-python>=4.8
+numpy>=1.24
+pillow>=10.0
+
 # Áudio: opcional, porém recomendado.
-# No Windows, se a instalação falhar, use:  pip install pipwin && pipwin install pyaudio
-# No Linux (Debian/Ubuntu):  sudo apt install portaudio19-dev python3-pyaudio
-sounddevice==0.5.6
+# O sounddevice é o motor preferencial por ter rodas compatíveis com o
+# Python 3.13/3.14 e depender apenas do PortAudio do sistema.
+#   Windows/macOS: nada além do pip é necessário.
+#   Linux (Debian/Ubuntu):  sudo apt install libportaudio2
+# Se o sounddevice não estiver presente, o projeto tenta o PyAudio
+# automaticamente; sem nenhum dos dois, roda apenas com vídeo e chat.
+sounddevice>=0.4.6

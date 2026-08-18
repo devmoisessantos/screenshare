@@ -24,7 +24,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 NOME_APLICACAO = "ScreenShare"
-VERSAO_APLICACAO = "1.0.0"
+VERSAO_APLICACAO = "1.1.0"
 
 #: Resoluções suportadas para o compartilhamento de tela.
 RESOLUCOES: dict[str, tuple[int, int]] = {
@@ -79,6 +79,9 @@ class ConfiguracaoVideo:
     qualidade_maxima: int = 90
     monitor: int = 1
     compressao_adaptativa: bool = True
+    #: Taxa da pré-visualização local do host. Mantida baixa de propósito:
+    #: a prévia é apenas uma conferência e não deve roubar CPU da transmissão.
+    fps_previa: int = 10
 
     @property
     def dimensoes(self) -> tuple[int, int]:
@@ -110,7 +113,7 @@ class ConfiguracaoRede:
     endereco_escuta: str = "0.0.0.0"
     porta: int = PORTA_PADRAO
     senha: str = ""
-    tempo_limite: float = 15.0
+    tempo_limite: float = 8.0
     intervalo_ping: float = 3.0
     tentativas_reconexao: int = 3
     intervalo_reconexao: float = 3.0
@@ -226,6 +229,7 @@ def obter_tema(nome: str) -> dict[str, str]:
 ATALHOS: dict[str, str] = {
     "<Control-q>": "Encerrar a janela atual",
     "<Control-m>": "Ativar/desativar o microfone",
+    "<Control-d>": "Ativar/desativar o som recebido",
     "<Control-s>": "Iniciar/parar o compartilhamento",
     "<Control-Return>": "Enviar mensagem do chat",
 }

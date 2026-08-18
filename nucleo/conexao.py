@@ -161,14 +161,36 @@ def criar_socket_escuta(endereco: str, porta: int, fila: int = 1) -> socket.sock
     return soquete
 
 
-def conectar(ip: str, porta: int, tempo_limite: float = 15.0) -> Conexao:
+def conectar(ip: str, porta: int, tempo_limite: float = 8.0) -> Conexao:
     """Conecta-se a um servidor e devolve a :class:`Conexao` resultante.
+
+    As falhas são traduzidas em mensagens acionáveis: cada motivo de recusa
+    tem uma solução diferente, e um único texto genérico como "timed out"
+    deixaria o usuário sem saber o que fazer.
 
     Raises:
         ConexaoEncerrada: se a conexão não puder ser estabelecida.
     """
     try:
         soquete = socket.create_connection((ip, porta), timeout=tempo_limite)
+    except (TimeoutError, socket.timeout) as erro:
+        raise ConexaoEncerrada(
+            f"Tempo esgotado ao conectar a {ip}:{porta}.\n\n"
+            "A máquina do host não respondeu. Isso quase sempre significa "
+            "firewall bloqueando a porta ou endereço IP incorreto - "
+            'use o botão "Diagnóstico" para identificar a causa.'
+        ) from erro
+    except ConnectionRefusedError as erro:
+        raise ConexaoEncerrada(
+            f"O host {ip} recusou a conexão na porta {porta}.\n\n"
+            "A rede está funcionando, mas nada está escutando nessa porta: "
+            'confirme se o host já clicou em "Iniciar compartilhamento" e se '
+            "a porta é a mesma exibida na tela dele."
+        ) from erro
+    except socket.gaierror as erro:
+        raise ConexaoEncerrada(
+            f"Não foi possível resolver o endereço {ip} ({erro})."
+        ) from erro
     except OSError as erro:
         raise ConexaoEncerrada(f"Não foi possível conectar a {ip}:{porta} ({erro})") from erro
     soquete.settimeout(None)

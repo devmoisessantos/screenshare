@@ -17,7 +17,12 @@ from dataclasses import dataclass
 from typing import Callable
 
 from configuracao.configuracoes import Configuracoes
-from midia.captura_audio import CapturadorAudio, ErroAudio, ReprodutorAudio
+from midia.captura_audio import (
+    MOTIVO_AUDIO_INDISPONIVEL,
+    CapturadorAudio,
+    ErroAudio,
+    ReprodutorAudio,
+)
 from midia.captura_tela import CapturadorTela, ErroCapturaTela
 from midia.compressao import ControladorQualidade, ErroCompressao, comprimir_jpeg
 from nucleo.conexao import Conexao, ConexaoEncerrada
@@ -80,7 +85,12 @@ class Sessao:
         self.retornos = retornos or Retornos()
 
         self.estatisticas = Estatisticas(qualidade=configuracoes.video.qualidade_jpeg)
+        #: Controla o envio do próprio microfone (botão "mudo").
         self.microfone_ativo = configuracoes.audio.ativo
+        #: Controla a reprodução do áudio recebido (botão "desativar som").
+        #: Como no Discord, silenciar a saída é independente de silenciar o
+        #: microfone; os pacotes continuam chegando, apenas são descartados.
+        self.som_ativo = True
 
         self._ativa = False
         self._encerrando = threading.Event()
@@ -139,7 +149,7 @@ class Sessao:
             return
         reprodutor = ReprodutorAudio(self.configuracoes.audio)
         if not reprodutor.disponivel:
-            self._notificar_erro("Áudio indisponível: PyAudio não instalado.")
+            self._notificar_erro(f"Áudio indisponível: {MOTIVO_AUDIO_INDISPONIVEL}")
             return
         try:
             reprodutor.iniciar()
@@ -196,6 +206,12 @@ class Sessao:
         self._enviar_estado({"microfone": self.microfone_ativo})
         return self.microfone_ativo
 
+    def alternar_som(self) -> bool:
+        """Ativa/desativa a reprodução do áudio recebido e devolve o estado."""
+        self.som_ativo = not self.som_ativo
+        self.estatisticas.audio_ativo = self.som_ativo and self._reprodutor is not None
+        return self.som_ativo
+
     def _enviar_estado(self, dados: dict) -> None:
         """Informa o outro lado sobre mudanças de estado (mudo, resolução...)."""
         try:
@@ -233,7 +249,10 @@ class Sessao:
                 self.retornos.ao_video(carga)
 
         elif tipo is TipoMensagem.AUDIO:
-            if self._reprodutor is not None:
+            # Quando o som está desativado o bloco é simplesmente descartado:
+            # é mais barato que renegociar a transmissão e mantém a reativação
+            # instantânea.
+            if self._reprodutor is not None and self.som_ativo:
                 self._reprodutor.escrever(carga)
 
         elif tipo is TipoMensagem.CHAT:

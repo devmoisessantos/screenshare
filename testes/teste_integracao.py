@@ -195,3 +195,53 @@ class TesteIntegracao(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TesteControlesAudioSessao(unittest.TestCase):
+    """Valida os controles de microfone e de som, sem abrir rede real."""
+
+    def _criar_sessao(self) -> Sessao:
+        conexao = mock.MagicMock()
+        conexao.aberta = True
+        return Sessao(
+            conexao=conexao,
+            configuracoes=configuracoes_de_teste(porta=45999),
+            transmitir_video=False,
+            apelido="Teste",
+            retornos=Retornos(),
+        )
+
+    def test_estado_inicial(self) -> None:
+        sessao = self._criar_sessao()
+        # O áudio está desativado nas configurações de teste; o som recebido,
+        # porém, começa habilitado para não silenciar o outro participante.
+        self.assertFalse(sessao.microfone_ativo)
+        self.assertTrue(sessao.som_ativo)
+
+    def test_alternar_microfone_avisa_o_outro_lado(self) -> None:
+        sessao = self._criar_sessao()
+        self.assertTrue(sessao.alternar_microfone())
+        sessao.conexao.enviar.assert_called()
+        tipo = sessao.conexao.enviar.call_args[0][0]
+        self.assertIs(tipo, TipoMensagem.ESTADO)
+
+    def test_alternar_som_e_local(self) -> None:
+        """Desativar o som não deve gerar tráfego: é decisão local."""
+        sessao = self._criar_sessao()
+        sessao.conexao.enviar.reset_mock()
+        self.assertFalse(sessao.alternar_som())
+        self.assertTrue(sessao.alternar_som())
+        sessao.conexao.enviar.assert_not_called()
+
+    def test_audio_recebido_e_descartado_com_som_desativado(self) -> None:
+        sessao = self._criar_sessao()
+        reprodutor = mock.MagicMock()
+        sessao._reprodutor = reprodutor
+
+        sessao._despachar(TipoMensagem.AUDIO, b"\x00\x01")
+        reprodutor.escrever.assert_called_once()
+
+        reprodutor.reset_mock()
+        sessao.alternar_som()
+        sessao._despachar(TipoMensagem.AUDIO, b"\x00\x01")
+        reprodutor.escrever.assert_not_called()

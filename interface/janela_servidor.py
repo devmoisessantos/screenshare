@@ -1,4 +1,11 @@
-"""Janela do servidor (host) - quem compartilha a tela."""
+"""Janela do servidor (host) - quem compartilha a tela.
+
+Organizada em duas colunas para acomodar a pré-visualização local:
+
+* **Esquerda** - configurações, endereço de conexão, ações e estatísticas.
+* **Direita** - prévia do que está sendo transmitido, controles de áudio
+  (microfone e som) e o chat.
+"""
 
 from __future__ import annotations
 
@@ -13,16 +20,27 @@ from configuracao.configuracoes import (
     VERSAO_APLICACAO,
     Configuracoes,
 )
-from interface.componentes import PainelChat, PainelEstatisticas, PonteInterface
+from interface.componentes import (
+    BarraControleAudio,
+    PainelChat,
+    PainelEstatisticas,
+    PonteInterface,
+    VisualizadorVideo,
+)
+from interface.janela_diagnostico import JanelaDiagnostico
 from interface.tema import aplicar_tema
-from midia.captura_audio import AUDIO_DISPONIVEL
+from midia.captura_audio import AUDIO_DISPONIVEL, descrever_motor_audio
 from midia.captura_tela import descrever_monitores
+from midia.previa import PreVisualizadorTela
 from nucleo.sessao import Retornos
 from utilitarios.recursos import aplicar_icone
-from utilitarios.rede import obter_ip_local, validar_porta
+from utilitarios.rede import ip_local_recomendado, validar_porta
 from utilitarios.registro import obter_registrador
 
 _registrador = obter_registrador(__name__)
+
+#: Intervalo de redesenho da prévia (aproximadamente 60 Hz).
+INTERVALO_RENDERIZACAO_MS = 16
 
 
 class JanelaServidor(tk.Toplevel):
@@ -32,13 +50,15 @@ class JanelaServidor(tk.Toplevel):
         super().__init__(mestre)
         self.configuracoes = configuracoes
         self.title(f"{NOME_APLICACAO} {VERSAO_APLICACAO} - Compartilhando")
-        self.geometry("620x680")
-        self.minsize(560, 620)
+        self.geometry("1120x760")
+        self.minsize(980, 700)
 
         self._paleta = aplicar_tema(self, configuracoes.interface.tema)
         aplicar_icone(self)
         self._ponte = PonteInterface(self)
         self._servidor: ServidorCompartilhamento | None = None
+        self._previa: PreVisualizadorTela | None = None
+        self._renderizacao_agendada: str | None = None
 
         self._construir_interface()
         self._registrar_atalhos()
@@ -47,12 +67,33 @@ class JanelaServidor(tk.Toplevel):
     # -- Construção da interface -------------------------------------------
 
     def _construir_interface(self) -> None:
-        """Monta todos os widgets da janela."""
-        self.columnconfigure(0, weight=1)
-        self.rowconfigure(3, weight=1)
+        """Monta as duas colunas da janela."""
+        self.columnconfigure(0, weight=0, minsize=520)
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
 
-        # Cabeçalho -------------------------------------------------------
-        cabecalho = ttk.Frame(self, padding=(16, 14, 16, 6))
+        coluna_esquerda = ttk.Frame(self)
+        coluna_esquerda.grid(row=0, column=0, sticky="nsew")
+        coluna_esquerda.columnconfigure(0, weight=1)
+        coluna_esquerda.rowconfigure(3, weight=1)
+
+        coluna_direita = ttk.Frame(self)
+        coluna_direita.grid(row=0, column=1, sticky="nsew")
+        coluna_direita.columnconfigure(0, weight=1)
+        coluna_direita.rowconfigure(1, weight=3)
+        coluna_direita.rowconfigure(3, weight=2)
+
+        self._construir_cabecalho(coluna_esquerda)
+        self._construir_opcoes(coluna_esquerda)
+        self._construir_acoes(coluna_esquerda)
+        self._construir_ajuda(coluna_esquerda)
+        self._construir_estatisticas(coluna_esquerda)
+        self._construir_previa(coluna_direita)
+        self._construir_chat(coluna_direita)
+
+    def _construir_cabecalho(self, mestre: ttk.Frame) -> None:
+        """Título e linha de status."""
+        cabecalho = ttk.Frame(mestre, padding=(16, 14, 16, 6))
         cabecalho.grid(row=0, column=0, sticky="ew")
         cabecalho.columnconfigure(0, weight=1)
         ttk.Label(cabecalho, text="Compartilhar minha tela", style="Titulo.TLabel").grid(
@@ -60,11 +101,16 @@ class JanelaServidor(tk.Toplevel):
         )
         self._var_status = tk.StringVar(value="Pronto para iniciar")
         ttk.Label(
-            cabecalho, textvariable=self._var_status, style="Secundario.TLabel"
+            cabecalho,
+            textvariable=self._var_status,
+            style="Secundario.TLabel",
+            wraplength=470,
+            justify="left",
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
 
-        # Configurações ---------------------------------------------------
-        opcoes = ttk.Labelframe(self, text=" Configurações ", padding=12)
+    def _construir_opcoes(self, mestre: ttk.Frame) -> None:
+        """Painel de configurações da transmissão."""
+        opcoes = ttk.Labelframe(mestre, text=" Configurações ", padding=12)
         opcoes.grid(row=1, column=0, sticky="ew", padx=16, pady=6)
         for coluna in (1, 3):
             opcoes.columnconfigure(coluna, weight=1)
@@ -167,13 +213,22 @@ class JanelaServidor(tk.Toplevel):
         )
         self._caixa_adaptativa.grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 0))
 
-        # Endereço e ações ------------------------------------------------
-        acoes = ttk.Frame(self, padding=(16, 6))
+        ttk.Label(
+            opcoes,
+            text=descrever_motor_audio(),
+            style="Secundario.TLabel",
+            wraplength=460,
+            justify="left",
+        ).grid(row=5, column=0, columnspan=4, sticky="w", pady=(6, 0))
+
+    def _construir_acoes(self, mestre: ttk.Frame) -> None:
+        """Endereço publicado, botões de iniciar/parar e diagnóstico."""
+        acoes = ttk.Frame(mestre, padding=(16, 6))
         acoes.grid(row=2, column=0, sticky="ew")
         acoes.columnconfigure(1, weight=1)
 
         self._var_endereco = tk.StringVar(
-            value=f"{obter_ip_local()}:{self.configuracoes.rede.porta}"
+            value=f"{ip_local_recomendado()}:{self.configuracoes.rede.porta}"
         )
         ttk.Label(acoes, text="Endereço:").grid(row=0, column=0, sticky="w")
         ttk.Label(
@@ -183,21 +238,85 @@ class JanelaServidor(tk.Toplevel):
             row=0, column=2, padx=(8, 0)
         )
 
+        ttk.Label(
+            acoes,
+            text=(
+                "Se o espectador receber tempo esgotado, abra o diagnóstico "
+                "e libere a porta no firewall."
+            ),
+            style="Secundario.TLabel",
+            wraplength=470,
+            justify="left",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
         self._botao_iniciar = ttk.Button(
             acoes,
             text="Iniciar compartilhamento",
             style="Destaque.TButton",
             command=self._alternar_compartilhamento,
         )
-        self._botao_iniciar.grid(row=1, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        self._botao_iniciar.grid(row=2, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
-        self._botao_microfone = ttk.Button(
-            acoes, text="Mutar microfone", command=self._alternar_microfone, state="disabled"
+        ttk.Button(acoes, text="Diagnóstico", command=self._abrir_diagnostico).grid(
+            row=2, column=2, sticky="e", pady=(10, 0)
         )
-        self._botao_microfone.grid(row=1, column=2, sticky="e", pady=(10, 0))
 
-        # Chat -------------------------------------------------------------
-        area_chat = ttk.Frame(self, padding=(16, 10))
+    def _construir_ajuda(self, mestre: ttk.Frame) -> None:
+        """Passo a passo e atalhos, para dispensar consulta à documentação."""
+        ajuda = ttk.Labelframe(mestre, text=" Como o espectador se conecta ", padding=12)
+        ajuda.grid(row=3, column=0, sticky="new", padx=16, pady=6)
+        ajuda.columnconfigure(0, weight=1)
+
+        passos = (
+            '1. Clique em "Iniciar compartilhamento".'
+            "\n2. Copie o endereço acima e envie ao espectador."
+            "\n3. Na primeira vez, libere a porta no firewall pelo "
+            'botão "Diagnóstico".'
+            "\n4. O espectador abre o modo Assistir e cola o endereço."
+            "\n\nAtalhos: Ctrl+S inicia/para, Ctrl+M muta o microfone, "
+            "Ctrl+D desliga o som, Ctrl+Q fecha."
+        )
+        ttk.Label(
+            ajuda,
+            text=passos,
+            style="Secundario.TLabel",
+            justify="left",
+            wraplength=460,
+        ).grid(row=0, column=0, sticky="w")
+
+    def _construir_estatisticas(self, mestre: ttk.Frame) -> None:
+        """Painel inferior com as métricas da sessão."""
+        self._estatisticas = PainelEstatisticas(mestre, self._paleta)
+        self._estatisticas.grid(row=4, column=0, sticky="ew", padx=16, pady=(6, 14))
+        self._estatisticas.definir_texto("Compartilhamento inativo")
+
+    def _construir_previa(self, mestre: ttk.Frame) -> None:
+        """Prévia local da transmissão e controles de áudio."""
+        ttk.Label(
+            mestre,
+            text="Prévia da minha transmissão",
+            style="Titulo.TLabel",
+        ).grid(row=0, column=0, sticky="w", padx=16, pady=(14, 6))
+
+        self._visualizador = VisualizadorVideo(mestre, self._paleta)
+        self._visualizador.grid(row=1, column=0, sticky="nsew", padx=16)
+        self._visualizador.limpar("A prévia aparece ao iniciar o compartilhamento.")
+
+        self._controles_audio = BarraControleAudio(
+            mestre,
+            self._paleta,
+            ao_alternar_microfone=self._alternar_microfone,
+            ao_alternar_som=self._alternar_som,
+            disponivel=AUDIO_DISPONIVEL,
+            motivo_indisponivel=descrever_motor_audio(),
+        )
+        self._controles_audio.grid(row=2, column=0, sticky="ew", padx=16, pady=(10, 4))
+        if AUDIO_DISPONIVEL:
+            self._controles_audio.definir_habilitado(False)
+
+    def _construir_chat(self, mestre: ttk.Frame) -> None:
+        """Painel de chat com o espectador."""
+        area_chat = ttk.Frame(mestre, padding=(16, 6, 16, 14))
         area_chat.grid(row=3, column=0, sticky="nsew")
         area_chat.columnconfigure(0, weight=1)
         area_chat.rowconfigure(0, weight=1)
@@ -205,15 +324,11 @@ class JanelaServidor(tk.Toplevel):
         self._chat.grid(row=0, column=0, sticky="nsew")
         self._chat.definir_habilitado(False)
 
-        # Estatísticas -----------------------------------------------------
-        self._estatisticas = PainelEstatisticas(self, self._paleta)
-        self._estatisticas.grid(row=4, column=0, sticky="ew", padx=16, pady=(0, 14))
-        self._estatisticas.definir_texto("Compartilhamento inativo")
-
     def _registrar_atalhos(self) -> None:
         """Vincula os atalhos de teclado da janela."""
         self.bind("<Control-q>", lambda _e: self._ao_fechar())
-        self.bind("<Control-m>", lambda _e: self._alternar_microfone())
+        self.bind("<Control-m>", lambda _e: self._controles_audio.alternar_microfone())
+        self.bind("<Control-d>", lambda _e: self._controles_audio.alternar_som())
         self.bind("<Control-s>", lambda _e: self._alternar_compartilhamento())
 
     # -- Ações da interface -------------------------------------------------
@@ -223,6 +338,10 @@ class JanelaServidor(tk.Toplevel):
         self.clipboard_clear()
         self.clipboard_append(self._var_endereco.get())
         self._chat.adicionar_sistema("Endereço copiado para a área de transferência.")
+
+    def _abrir_diagnostico(self) -> None:
+        """Abre a janela de diagnóstico de rede."""
+        JanelaDiagnostico(self, self.configuracoes, self._var_endereco.get())
 
     def _alternar_compartilhamento(self) -> None:
         """Inicia ou para o compartilhamento conforme o estado atual."""
@@ -265,7 +384,7 @@ class JanelaServidor(tk.Toplevel):
         return True
 
     def _iniciar_compartilhamento(self) -> None:
-        """Cria o servidor e começa a aguardar o espectador."""
+        """Cria o servidor, inicia a prévia e começa a aguardar o espectador."""
         if not self._coletar_configuracoes():
             return
 
@@ -302,16 +421,20 @@ class JanelaServidor(tk.Toplevel):
             f"{self._servidor.endereco_publicado} ao espectador."
         )
         self._estatisticas.definir_texto("Aguardando espectador...")
+        self._iniciar_previa()
 
     def _parar_compartilhamento(self) -> None:
-        """Encerra o servidor e volta a interface ao estado inicial."""
+        """Encerra o servidor, para a prévia e restaura o estado inicial."""
         if self._servidor is not None:
             self._servidor.parar()
             self._servidor = None
+        self._parar_previa()
         self._botao_iniciar.configure(
             text="Iniciar compartilhamento", style="Destaque.TButton"
         )
-        self._botao_microfone.configure(state="disabled", text="Mutar microfone")
+        if AUDIO_DISPONIVEL:
+            self._controles_audio.definir_habilitado(False)
+            self._controles_audio.definir_estado_remoto("")
         self._definir_estado_configuracoes("normal")
         self._chat.definir_habilitado(False)
         self._var_status.set("Compartilhamento parado")
@@ -329,17 +452,66 @@ class JanelaServidor(tk.Toplevel):
         if AUDIO_DISPONIVEL:
             self._caixa_audio.configure(state=estado)
 
-    def _alternar_microfone(self) -> None:
-        """Ativa/desativa o envio do microfone durante a sessão."""
-        if self._servidor is None or self._servidor.sessao is None:
+    # -- Pré-visualização ---------------------------------------------------
+
+    def _iniciar_previa(self) -> None:
+        """Liga a captura da prévia e o laço de redesenho."""
+        if self._previa is not None:
             return
-        ativo = self._servidor.sessao.alternar_microfone()
-        self._botao_microfone.configure(
-            text="Mutar microfone" if ativo else "Ativar microfone"
+        self._previa = PreVisualizadorTela(
+            self.configuracoes.video,
+            ao_quadro=self._visualizador.definir_quadro,
+            fps=self.configuracoes.video.fps_previa,
+            ao_erro=lambda mensagem: self._ponte.agendar(
+                self._chat.adicionar_sistema, mensagem
+            ),
         )
+        self._previa.iniciar()
+        self._agendar_renderizacao()
+
+    def _parar_previa(self) -> None:
+        """Desliga a captura da prévia e limpa o visualizador."""
+        if self._renderizacao_agendada is not None:
+            try:
+                self.after_cancel(self._renderizacao_agendada)
+            except tk.TclError:  # pragma: no cover - janela em destruição
+                pass
+            self._renderizacao_agendada = None
+        if self._previa is not None:
+            self._previa.parar()
+            self._previa = None
+        self._visualizador.limpar("A prévia aparece ao iniciar o compartilhamento.")
+
+    def _agendar_renderizacao(self) -> None:
+        """Redesenha a prévia periodicamente na thread da interface."""
+        if self._previa is None:
+            return
+        self._visualizador.renderizar()
+        self._renderizacao_agendada = self.after(
+            INTERVALO_RENDERIZACAO_MS, self._agendar_renderizacao
+        )
+
+    # -- Controles de áudio -------------------------------------------------
+
+    def _alternar_microfone(self) -> bool:
+        """Ativa/desativa o envio do microfone. Devolve o novo estado."""
+        if self._servidor is None or self._servidor.sessao is None:
+            return True
+        ativo = self._servidor.sessao.alternar_microfone()
         self._chat.adicionar_sistema(
             "Microfone ativado." if ativo else "Microfone silenciado."
         )
+        return ativo
+
+    def _alternar_som(self) -> bool:
+        """Ativa/desativa a reprodução do áudio recebido."""
+        if self._servidor is None or self._servidor.sessao is None:
+            return True
+        ativo = self._servidor.sessao.alternar_som()
+        self._chat.adicionar_sistema(
+            "Som ativado." if ativo else "Som desativado (nada será reproduzido)."
+        )
+        return ativo
 
     def _enviar_chat(self, texto: str) -> None:
         """Envia uma mensagem de chat ao espectador."""
@@ -356,8 +528,13 @@ class JanelaServidor(tk.Toplevel):
     def _ao_conectar(self, informacoes: dict) -> None:
         """Atualiza a interface quando um espectador entra."""
         self._chat.definir_habilitado(True)
-        if AUDIO_DISPONIVEL and self.configuracoes.audio.ativo:
-            self._botao_microfone.configure(state="normal")
+        if AUDIO_DISPONIVEL:
+            self._controles_audio.definir_habilitado(True)
+            sessao = self._servidor.sessao if self._servidor else None
+            if sessao is not None:
+                self._controles_audio.sincronizar(
+                    sessao.microfone_ativo, sessao.som_ativo
+                )
         self._chat.adicionar_sistema(
             f"{informacoes.get('apelido', 'Espectador')} "
             f"({informacoes.get('ip', '?')}) entrou na sessão."
@@ -374,15 +551,21 @@ class JanelaServidor(tk.Toplevel):
     def _exibir_estado(self, dados: dict) -> None:
         """Exibe mudanças de estado informadas pelo espectador."""
         if "microfone" in dados:
-            estado = "ativou" if dados["microfone"] else "silenciou"
+            apelido = dados.get("apelido", "Espectador")
+            ativo = bool(dados["microfone"])
             self._chat.adicionar_sistema(
-                f"{dados.get('apelido', 'Espectador')} {estado} o microfone."
+                f"{apelido} {'ativou' if ativo else 'silenciou'} o microfone."
+            )
+            self._controles_audio.definir_estado_remoto(
+                f"{apelido}: microfone {'ligado' if ativo else 'mudo'}"
             )
 
     def _ao_encerrar(self, motivo: str) -> None:
         """Reage ao encerramento da sessão de mídia."""
         self._chat.definir_habilitado(False)
-        self._botao_microfone.configure(state="disabled")
+        if AUDIO_DISPONIVEL:
+            self._controles_audio.definir_habilitado(False)
+            self._controles_audio.definir_estado_remoto("")
         self._chat.adicionar_sistema(motivo)
         self._estatisticas.definir_texto("Aguardando espectador...")
 
@@ -390,6 +573,7 @@ class JanelaServidor(tk.Toplevel):
 
     def _ao_fechar(self) -> None:
         """Encerra tudo e fecha a janela."""
+        self._parar_previa()
         if self._servidor is not None:
             self._servidor.parar()
             self._servidor = None

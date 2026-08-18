@@ -245,3 +245,124 @@ class VisualizadorVideo(ttk.Frame):
         self.canvas.delete("quadro")
         self._imagem = None
         self.canvas.itemconfigure(self._texto_id, state="normal", text=mensagem)
+
+
+class BarraControleAudio(ttk.Frame):
+    """Barra com os botões de microfone e de som, no estilo do Discord.
+
+    Os dois controles são independentes e possuem estado visual explícito:
+
+    * **Microfone** - deixa de enviar o próprio áudio (mudo).
+    * **Som** - deixa de reproduzir o áudio recebido (desativar som).
+
+    Quando o áudio não está disponível na máquina, os botões aparecem
+    desabilitados com o motivo em um rótulo ao lado, em vez de simplesmente
+    não funcionarem.
+
+    Args:
+        mestre: widget pai.
+        paleta: cores do tema em uso.
+        ao_alternar_microfone: função chamada ao clicar no microfone; deve
+            devolver o novo estado (``True`` = ativo).
+        ao_alternar_som: idem para o som.
+        disponivel: se o áudio existe nesta máquina.
+        motivo_indisponivel: texto exibido quando ``disponivel`` é ``False``.
+    """
+
+    #: Rótulos dos botões. Apenas caracteres com boa renderização no tkinter.
+    ROTULO_MICROFONE_ATIVO = "Microfone: ligado"
+    ROTULO_MICROFONE_MUDO = "Microfone: MUDO"
+    ROTULO_SOM_ATIVO = "Som: ligado"
+    ROTULO_SOM_MUDO = "Som: DESLIGADO"
+
+    def __init__(
+        self,
+        mestre: tk.Misc,
+        paleta: dict[str, str],
+        ao_alternar_microfone: Callable[[], bool],
+        ao_alternar_som: Callable[[], bool],
+        disponivel: bool = True,
+        motivo_indisponivel: str = "",
+    ) -> None:
+        super().__init__(mestre, style="TFrame")
+        self._paleta = paleta
+        self._ao_alternar_microfone = ao_alternar_microfone
+        self._ao_alternar_som = ao_alternar_som
+        self._microfone_ativo = True
+        self._som_ativo = True
+
+        self.botao_microfone = ttk.Button(
+            self, text=self.ROTULO_MICROFONE_ATIVO, command=self.alternar_microfone
+        )
+        self.botao_microfone.grid(row=0, column=0, sticky="w")
+
+        self.botao_som = ttk.Button(
+            self, text=self.ROTULO_SOM_ATIVO, command=self.alternar_som
+        )
+        self.botao_som.grid(row=0, column=1, sticky="w", padx=(8, 0))
+
+        self._var_estado_remoto = tk.StringVar(value="")
+        self.rotulo_estado = ttk.Label(
+            self, textvariable=self._var_estado_remoto, style="Secundario.TLabel"
+        )
+        self.rotulo_estado.grid(row=0, column=2, sticky="w", padx=(12, 0))
+
+        self.columnconfigure(2, weight=1)
+
+        if not disponivel:
+            self.definir_indisponivel(motivo_indisponivel or "áudio indisponível")
+
+    # -- Estado -------------------------------------------------------------
+
+    def definir_indisponivel(self, motivo: str) -> None:
+        """Desabilita os controles e explica o motivo ao usuário."""
+        self.botao_microfone.configure(state="disabled")
+        self.botao_som.configure(state="disabled")
+        self._var_estado_remoto.set(motivo)
+
+    def definir_habilitado(self, habilitado: bool) -> None:
+        """Habilita ou desabilita os dois botões."""
+        estado = "normal" if habilitado else "disabled"
+        self.botao_microfone.configure(state=estado)
+        self.botao_som.configure(state=estado)
+
+    def definir_estado_remoto(self, texto: str) -> None:
+        """Mostra o estado de áudio do outro participante."""
+        self._var_estado_remoto.set(texto)
+
+    def alternar_microfone(self) -> None:
+        """Aciona o callback do microfone e atualiza o rótulo."""
+        self._microfone_ativo = bool(self._ao_alternar_microfone())
+        self.botao_microfone.configure(
+            text=(
+                self.ROTULO_MICROFONE_ATIVO
+                if self._microfone_ativo
+                else self.ROTULO_MICROFONE_MUDO
+            ),
+            style="TButton" if self._microfone_ativo else "Perigo.TButton",
+        )
+
+    def alternar_som(self) -> None:
+        """Aciona o callback do som e atualiza o rótulo."""
+        self._som_ativo = bool(self._ao_alternar_som())
+        self.botao_som.configure(
+            text=self.ROTULO_SOM_ATIVO if self._som_ativo else self.ROTULO_SOM_MUDO,
+            style="TButton" if self._som_ativo else "Perigo.TButton",
+        )
+
+    def sincronizar(self, microfone_ativo: bool, som_ativo: bool) -> None:
+        """Ajusta os rótulos a um estado conhecido, sem acionar callbacks."""
+        self._microfone_ativo = microfone_ativo
+        self._som_ativo = som_ativo
+        self.botao_microfone.configure(
+            text=(
+                self.ROTULO_MICROFONE_ATIVO
+                if microfone_ativo
+                else self.ROTULO_MICROFONE_MUDO
+            ),
+            style="TButton" if microfone_ativo else "Perigo.TButton",
+        )
+        self.botao_som.configure(
+            text=self.ROTULO_SOM_ATIVO if som_ativo else self.ROTULO_SOM_MUDO,
+            style="TButton" if som_ativo else "Perigo.TButton",
+        )

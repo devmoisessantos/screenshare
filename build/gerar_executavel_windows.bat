@@ -29,9 +29,9 @@ python -m pip install --upgrade pip >nul
 python -m pip install -r requirements.txt
 if errorlevel 1 (
     echo.
-    echo AVISO: alguma dependencia falhou. Tentando sem o PyAudio...
+    echo AVISO: alguma dependencia falhou. Tentando sem o audio...
     python -m pip install mss opencv-python numpy pillow || goto :erro
-    echo O aplicativo funcionara sem audio ate o PyAudio ser instalado.
+    echo O aplicativo funcionara sem audio ate o sounddevice ser instalado.
 )
 python -m pip install pyinstaller || goto :erro
 
