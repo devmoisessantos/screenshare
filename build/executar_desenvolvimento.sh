@@ -8,6 +8,6 @@ cd "$(dirname "$0")/.."
 # shellcheck disable=SC1091
 source .venv/bin/activate
 python -m pip install --quiet --upgrade pip
-python -m pip install --quiet -r requirements.txt || python -m pip install --quiet mss opencv-python numpy pillow
+python -m pip install --quiet -r requirements.txt
 
 exec python principal.py "$@"

@@ -189,6 +189,8 @@ class VisualizadorVideo(ttk.Frame):
         self._paleta = paleta
         self._trava = threading.Lock()
         self._quadro_pendente: np.ndarray | None = None
+        self._ultimo_quadro: np.ndarray | None = None
+        self._tamanho_desenhado: tuple[int, int] = (0, 0)
         self._imagem: ImageTk.PhotoImage | None = None
 
         self.canvas = tk.Canvas(
@@ -202,6 +204,16 @@ class VisualizadorVideo(ttk.Frame):
         self._texto_id = self.canvas.create_text(
             10, 10, text="Aguardando vídeo...", fill=paleta["texto_secundario"], anchor="nw"
         )
+        # Redesenha ao redimensionar: sem isso um quadro desenhado antes de a
+        # janela ter tamanho final ficaria minúsculo até chegar o próximo.
+        self.canvas.bind("<Configure>", self._ao_redimensionar)
+
+    def _ao_redimensionar(self, _evento: tk.Event) -> None:
+        """Reaproveita o último quadro quando o tamanho do canvas muda."""
+        if self._ultimo_quadro is None:
+            return
+        with self._trava:
+            self._quadro_pendente = self._ultimo_quadro
 
     # -- Atualização --------------------------------------------------------
 
@@ -217,6 +229,7 @@ class VisualizadorVideo(ttk.Frame):
             self._quadro_pendente = None
         if quadro is None:
             return
+        self._ultimo_quadro = quadro
 
         largura_canvas = max(1, self.canvas.winfo_width())
         altura_canvas = max(1, self.canvas.winfo_height())
@@ -244,6 +257,9 @@ class VisualizadorVideo(ttk.Frame):
         """Remove a imagem exibida e mostra uma mensagem."""
         self.canvas.delete("quadro")
         self._imagem = None
+        self._ultimo_quadro = None
+        with self._trava:
+            self._quadro_pendente = None
         self.canvas.itemconfigure(self._texto_id, state="normal", text=mensagem)
 
 

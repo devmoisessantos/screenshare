@@ -1,23 +1,27 @@
-# Dependências de execução do ScreenShare
+# Dependências de execução do ScreenShare 2.0
 #
-# As versões usam ">=" para permitir instalação em Python 3.9 até 3.14.
+# As versões usam ">=" para permitir instalação em Python 3.10 ou superior:
+# fixar versões exatas quebraria a instalação nas versões mais novas do
+# Python, que exigem rodas (wheels) mais recentes.
 
+# Captura de tela, conversão de imagem e interface de vídeo.
 mss>=9.0.1
 opencv-python>=4.8
 numpy>=1.24
 pillow>=10.0
 
+# Chamadas pela internet: WebRTC, quadros/codec do FFmpeg e sinalização
+# WebSocket/HTTP. O aiortc usa o PyAV internamente e o aiohttp também é usado
+# pelo servidor de sinalização incluído no repositório.
+aiortc>=1.15.0
+av>=17.1.0
+aiohttp>=3.14.3
+
 # Áudio: opcional, porém recomendado.
 # O sounddevice é o motor preferencial por ter rodas compatíveis com o
-# Python 3.13/3.14 e depender apenas do PortAudio do sistema.
+# Python atual e depender apenas do PortAudio do sistema.
 #   Windows/macOS: nada além do pip é necessário.
 #   Linux (Debian/Ubuntu):  sudo apt install libportaudio2
 # Se o sounddevice não estiver presente, o projeto tenta o PyAudio
 # automaticamente; sem nenhum dos dois, roda apenas com vídeo e chat.
 sounddevice>=0.4.6
-
-# WebRTC (modo internet) — opcional nesta fase.
-# Instale para ativar o modo de conexão pela internet com NAT traversal.
-#   pip install aiortc aiohttp
-aiortc>=1.9.0
-aiohttp>=3.9.0

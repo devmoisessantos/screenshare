@@ -1,221 +1,216 @@
-# Arquitetura do ScreenShare 1.0
+# Arquitetura do ScreenShare 2.0
 
-Documento de referência técnica para manutenção e evolução do projeto.
+Documento técnico de referência para manutenção, empacotamento e evolução do ScreenShare 2.0.
 
 ## 1. Visão geral
 
-O ScreenShare é uma aplicação desktop cliente-servidor de compartilhamento de tela ponto a ponto. Não existe servidor central: o próprio usuário que compartilha a tela hospeda o serviço TCP, e o espectador conecta diretamente a ele.
+O ScreenShare é uma aplicação desktop Tkinter para chamadas de voz, vídeo, compartilhamento de tela e chat. O caminho principal da versão 2.0 usa WebRTC em topologia de malha: cada pessoa abre uma conexão direta com cada outra pessoa da sala. O limite é de seis participantes (`LIMITE_PARTICIPANTES`), pois a quantidade de conexões e a banda de subida crescem com a sala.
 
+Há dois modos independentes:
+
+1. **Chamada pela internet**: WebRTC, com sinalização WebSocket, ICE/STUN e TURN opcional.
+2. **Rede local (avançado)**: modo TCP direto legado, mantido para máquinas que conseguem se alcançar diretamente. Ele não atravessa NAT.
+
+O servidor de sinalização é um componente separado em `servidor_sinalizacao/`. Ele cria salas, identifica participantes e encaminha mensagens de negociação. Ele não recebe áudio, vídeo, tela nem chat depois que os pares WebRTC estão conectados.
+
+```text
++------------------------------------------------------------------+
+|                         interface/                               |
+| janela_inicial | janela_chamada | seletor_fonte | chat_rico      |
+| painel_participantes | emojis | componentes/PonteInterface       |
++------------------------------------------------------------------+
+                              | callbacks agendados no Tk
++------------------------------------------------------------------+
+|                           nucleo/                                |
+| chamada.py (orquestrador) | sinalizacao.py | par_webrtc.py       |
+| convite.py (links/codigos/SDP manual)                             |
++------------------------------------------------------------------+
+                         |                         |
++-------------------------------+   +------------------------------+
+|            midia/             |   |       configuracao/          |
+| fontes | faixas_webrtc        |   | WebRTC, TURN, gravação, UI   |
+| dispositivos | gravador       |   +------------------------------+
++-------------------------------+
+                              |
++------------------------------------------------------------------+
+|       aiortc / av / mss / sounddevice ou PyAudio                 |
++------------------------------------------------------------------+
+
+Modo legado em paralelo: aplicacao/ + nucleo/conexao.py +
+nucleo/protocolo.py + nucleo/sessao.py (TCP direto).
 ```
-+--------------------------------------------------+
-|                    interface/                    |  Camada de apresentação (Tkinter)
-| inicial | servidor | cliente | diagnostico       |
-+--------------------------------------------------+
-                        | callbacks / PonteInterface
-+--------------------------------------------------+
-|                   aplicacao/                     |  Casos de uso
-|      servidor.py            cliente.py           |
-+--------------------------------------------------+
-                        |
-+--------------------------------------------------+
-|                     nucleo/                      |  Comunicação
-|   protocolo.py    conexao.py    sessao.py        |
-+--------------------------------------------------+
-                        |
-+---------------------------+ +--------------------+
-|          midia/           | |   utilitarios/     |  Infraestrutura
-| captura_tela  compressao  | | registro  rede     |
-| captura_audio  previa     | | recursos           |
-+---------------------------+ +--------------------+
-                        |
-+--------------------------------------------------+
-|                 configuracao/                    |  Configuração e temas
-+--------------------------------------------------+
+
+## 2. Fluxos de sinalização e mídia
+
+### 2.1 Entrada em sala e negociação
+
+```text
+Participante A             Servidor de sinalização             Participante B
+      |                              |                                |
+      |--- WebSocket: entrar -------->|                                |
+      |<-- bem_vindo / participantes -|                                |
+      |                              |<------- WebSocket: entrar ------|
+      |<--------- entrou -------------|--------- bem_vindo ----------->|
+      |                              |                                |
+      |--- oferta SDP/ICE ----------->|--- oferta SDP/ICE ------------>|
+      |<-- resposta SDP/ICE ----------|<-- resposta SDP/ICE -----------|
+      |                              |                                |
+      |================ WebRTC direto (ICE/STUN/TURN) ===============>|
 ```
 
-Regras de dependência (respeitadas por todo o código):
+- `ClienteSinalizacao` mantém o WebSocket, envia `entrar`, `sinal`, `sair` e `ping`, e entrega os eventos por callbacks.
+- O servidor aceita `GET /ws` e limita cada sala a seis participantes. `GET /saude` fornece o estado mínimo para monitoramento de hospedagem.
+- O participante que chega depois inicia a oferta, evitando ofertas simultâneas.
+- `ParRemoto` transforma oferta, resposta e candidatos ICE em operações de `RTCPeerConnection`.
+- STUN ajuda a descobrir candidatos de conexão. TURN é opcional e pode retransmitir tráfego se não existir rota direta. A preferência `forcar_relay` é preservada na configuração ICE como intenção do usuário.
 
-1. `interface/` pode depender de tudo, mas nunca manipula sockets diretamente.
-2. `aplicacao/` depende de `nucleo/`, `midia/`, `configuracao/` e `utilitarios/`.
-3. `nucleo/` não conhece a interface: comunica-se por callbacks (`Retornos`).
-4. `midia/` e `utilitarios/` não dependem de nenhuma camada superior.
-5. `configuracao/` não depende de nada além da biblioteca padrão.
+### 2.2 Mídia e dados após a negociação
 
-## 2. Modelo de threads
+```text
+Fonte local / microfone
+        |
+        v
+FaixaTela / FaixaMicrofone  --->  MediaRelay
+        |                         |        |
+        |                         |        +--> prévia local / gravação
+        |                         |
+        |                         +--> um assinante para cada ParRemoto
+        v
+RTCPeerConnection  ===== WebRTC direto =====>  RTCPeerConnection remoto
+                                                     |          |
+                                                     v          v
+                                      ConsumidorFaixaVideo  ReprodutorFaixaRemota
+                                                     |          |
+                                                     v          v
+                                               grade Tk     saída de áudio
 
-Cada participante da sessão executa até cinco threads além da thread principal (interface):
+Canal de dados WebRTC: chat, estado de microfone, estado de compartilhamento e saída.
+```
 
-| Thread | Local | Responsabilidade |
+A mídia não passa pelo servidor de sinalização. `FaixaTela` captura com `mss`, adapta a imagem à resolução configurada e cria `av.VideoFrame`. `FaixaMicrofone` produz áudio PCM mono a 48 kHz em blocos de 20 ms. `ConsumidorFaixaVideo` converte os quadros recebidos para BGR antes de enviá-los à interface; `ReprodutorFaixaRemota` reamostra e reproduz o áudio remoto.
+
+O orquestrador `Chamada` executa uma thread dedicada com um laço `asyncio`. Métodos públicos chamados pela interface usam `run_coroutine_threadsafe`, e retornos da rede são transferidos de volta para a thread Tkinter pela `PonteInterface`. Widgets Tkinter não devem ser manipulados pela thread de rede.
+
+## 3. Camadas e módulos
+
+| Área | Módulo | Responsabilidade |
 | --- | --- | --- |
-| `recepcao` | ambos | lê quadros do socket e despacha por tipo de mensagem |
-| `ping` | ambos | envia `PING` periódico e calcula a latência com o `PONG` |
-| `estatisticas` | ambos | agrega FPS, taxas e descartes a cada segundo |
-| `envio-video` | apenas host | captura a tela, comprime em JPEG e envia |
-| `envio-audio` | ambos | lê o microfone e envia blocos PCM |
+| Entrada | `principal.py` | Analisa argumentos, carrega configurações e abre a interface ou o host TCP de console. |
+| Configuração | `configuracao/configuracoes.py` | Define dataclasses, valores de STUN, limite de participantes, TURN, gravação, temas e persistência JSON. |
+| Convites | `nucleo/convite.py` | Gera códigos de sala, cria/interpreta links `screenshare://` e codifica/decodifica blocos manuais de SDP `SS1-`. |
+| Sinalização | `nucleo/sinalizacao.py` | Cliente WebSocket `aiohttp`, reconexão, ping e callbacks de entrada, saída, sinal e erro. |
+| Par WebRTC | `nucleo/par_webrtc.py` | Encapsula uma conexão com um par, canal de dados, SDP, candidatos ICE, faixas, estados e estatísticas. |
+| Orquestração | `nucleo/chamada.py` | Mantém sala, participantes, pares, `MediaRelay`, compartilhamento, chat, estados, áudio e métricas. |
+| Fontes | `midia/fontes.py` | Enumera área de trabalho, monitores e janelas; reconsulta a região de uma janela que se move. |
+| Áudio | `midia/dispositivos.py` | Lista entradas e saídas por `sounddevice` ou PyAudio e identifica dispositivos padrão. |
+| Faixas | `midia/faixas_webrtc.py` | Implementa as faixas WebRTC locais, consumo de vídeo remoto e reprodução de áudio remoto. |
+| Gravação | `midia/gravador.py` | Grava MP4 por PyAV, mantém buffer circular JPEG/PCM e exporta clipes. |
+| Interface inicial | `interface/janela_inicial.py` | Oferece as abas de internet, rede local avançada e ajustes de TURN/gravação. |
+| Interface da chamada | `interface/janela_chamada.py` | Monta a chamada, a grade, controles, métricas, convite, tela cheia e integração de gravação. |
+| Seletor de fonte | `interface/seletor_fonte.py` | Mostra telas e janelas em cartões com miniaturas capturadas em thread. |
+| Participantes | `interface/painel_participantes.py` | Exibe avatar por iniciais, estado, microfone mudo e compartilhamento. |
+| Chat | `interface/chat_rico.py` | Apresenta histórico, mensagens de sistema/erro, atalhos e seletor de emojis. |
+| Emojis | `interface/emojis.py` | Localiza fontes do sistema e renderiza emojis como `PhotoImage` com fallback de texto. |
+| Sinalização hospedável | `servidor_sinalizacao/servidor.py` | Expõe salas WebSocket por `aiohttp`, rotas `/ws` e `/saude`, e encaminha sinais entre participantes. |
+| Modo legado | `aplicacao/`, `nucleo/conexao.py`, `nucleo/protocolo.py`, `nucleo/sessao.py` | Mantém compartilhamento TCP direto, protocolo binário, áudio, chat e diagnóstico local. |
+| Utilitários | `utilitarios/` | Configura logs, recursos do executável e diagnósticos de rede do modo TCP. |
 
-A thread de reprodução de áudio é criada pelo `ReprodutorAudio` (fila com descarte dos blocos antigos, para evitar acúmulo de latência).
+## 4. Convites e modos de conexão
 
-### Segurança entre threads
+### Código e link de sala
 
-- `Conexao.enviar` é protegido por um `threading.Lock`, garantindo que quadros de vídeo, áudio e chat nunca se intercalem no socket.
-- Widgets Tkinter só são tocados pela thread principal. As threads de rede publicam eventos em uma fila e a classe `PonteInterface` a esvazia via `after(30 ms)`.
-- O `VisualizadorVideo` guarda apenas o quadro mais recente (slot único com lock), então a interface nunca renderiza quadros atrasados.
+`Convite` normaliza códigos de seis caracteres e produz links no formato:
 
-## 3. Protocolo
-
-Formato do quadro:
-
+```text
+screenshare://sala/ABC123?s=wss%3A%2F%2Fmeu-servidor%2Fws
 ```
-+----------+--------+-------------+-----------------+
-| 2 bytes  | 1 byte |   4 bytes   |    N bytes      |
-|  "SS"    |  tipo  |  tamanho N  |   carga útil    |
-+----------+--------+-------------+-----------------+
-        struct "!2sBI" -> cabeçalho de 7 bytes
-```
 
-O prefixo mágico `SS` permite detectar imediatamente dessincronização ou conexões de clientes inválidos, algo que um cabeçalho apenas com o tamanho (4 bytes) não permite. O campo `tipo` de 1 byte evita ter de decodificar JSON para saber o que é a carga útil — essencial para o desempenho do fluxo de vídeo.
+O parâmetro `s` contém o WebSocket de sinalização e `p`, quando presente, contém a senha. Um código isolado não informa o servidor; por isso a configuração `internet.servidor_sinalizacao` precisa apontar para um servidor acessível pelos participantes.
 
-Tipos de mensagem em `nucleo/protocolo.py` (`TipoMensagem`):
+### Troca manual de SDP
 
-| Faixa | Uso |
+`codificar_sdp(sdp, tipo)` produz um bloco `SS1-` com JSON comprimido por `zlib` e Base64 URL-safe. `decodificar_sdp(blob)` devolve o SDP e o tipo (`oferta` ou `resposta`). É o formato de base para levar uma negociação manualmente por outro meio, sem servidor de sinalização.
+
+A interface gráfica padrão faz chamadas pela internet pelo fluxo de sala e WebSocket; o formato manual está isolado no núcleo e deve ser integrado por quem controlar manualmente a troca de SDP.
+
+### Modo TCP direto legado
+
+O modo legado é deliberadamente separado da pilha WebRTC. Ele escuta uma porta TCP, usa o protocolo binário de `nucleo/protocolo.py` e aceita um único espectador. É apropriado para rede local, mas não é uma solução de travessia de NAT.
+
+## 5. Fontes e faixas de mídia
+
+`listar_fontes()` sempre oferece a área de trabalho total e inclui monitores individuais quando a enumeração gráfica está disponível. Janelas específicas são obtidas por mecanismos da plataforma:
+
+| Plataforma | Mecanismo de janelas |
 | --- | --- |
-| 1–9 | negociação (`HANDSHAKE_PEDIDO`, `HANDSHAKE_ACEITO`, `HANDSHAKE_RECUSADO`, `PRONTO`) |
-| 10–19 | mídia (`VIDEO`, `AUDIO`) |
-| 20–29 | interação (`CHAT`) |
-| 30–39 | manutenção (`PING`, `PONG`) |
-| 40–49 | sincronização de estado (`ESTADO`) |
-| 50+ | encerramento (`ENCERRAR`) |
+| Windows | `user32` via `ctypes` |
+| macOS | Quartz, quando disponível |
+| Linux | `xdotool` ou `wmctrl`, quando instalados |
 
-A reserva de faixas permite adicionar mensagens futuras sem quebrar a compatibilidade da versão do protocolo (`VERSAO_PROTOCOLO`), que é validada no handshake.
+Para uma fonte de janela, `FaixaTela` pode consultar novamente a região antes de capturar, acompanhando sua movimentação. A captura e a conversão são deslocadas para uma thread com `asyncio.to_thread`, mantendo o laço assíncrono livre.
 
-### Handshake
+## 6. Gravação e buffer de clipes
 
-```
-Espectador                                Host
-    |  HANDSHAKE_PEDIDO {versao, apelido, token}  |
-    |-------------------------------------------->|
-    |                                             |  valida versão e token
-    |  HANDSHAKE_ACEITO {resolucao, fps, audio}   |
-    |<--------------------------------------------|  (ou HANDSHAKE_RECUSADO {motivo})
-    |  PRONTO                                     |
-    |-------------------------------------------->|
-    |  VIDEO / AUDIO ... (fluxo contínuo)         |
-    |<========================================>   |  CHAT / PING / ESTADO nos dois sentidos
-```
+`GerenciadorGravacao` é a fachada usada pela janela da chamada. Ele encaminha cada quadro local para a gravação contínua e para o `BufferClipes`, quando ativo.
 
-O token é `sha256(senha)`; senha vazia gera token vazio. A comparação usa `hmac.compare_digest`, resistente a ataques de tempo. O handshake tem tempo limite de 20 segundos (`TEMPO_LIMITE_HANDSHAKE`).
-
-## 4. Pipeline de vídeo
-
-```
-mss.grab (BGRA) -> descarta alfa (BGR) -> redimensiona (cv2) ->
-  cv2.imencode JPEG (qualidade dinâmica) -> Conexao.enviar(VIDEO)
-       ...rede...
-  cv2.imdecode -> BGR->RGB -> PIL.Image -> ImageTk (thread da interface)
-```
-
-O `ControladorQualidade` (em `midia/compressao.py`) ajusta o pipeline conforme a latência medida:
-
-| Latência | Ação |
+| Componente | Função |
 | --- | --- |
-| < 80 ms | aumenta gradualmente a qualidade JPEG (até o máximo configurado) |
-| 80–200 ms | mantém a qualidade |
-| > 200 ms (`LIMITE_LATENCIA_MS`) | reduz a qualidade JPEG |
-| > 2× o limite | além de reduzir, descarta quadros (`deve_descartar_quadro`) |
+| `Gravador` | Abre o MP4, codifica vídeo e áudio e fecha o arquivo. |
+| `_CodificadorMp4` | Configura streams de vídeo e AAC com PyAV; prefere `libx264` e usa `mpeg4` quando necessário. |
+| `BufferClipes` | Retém JPEGs e PCM recentes em memória e exporta os últimos segundos em MP4. |
+| `GerenciadorGravacao` | Trata erros para a interface, ativa/desativa buffer, grava e salva clipes. |
 
-Descartar quadros é preferível a enfileirá-los: em transmissão ao vivo, o quadro atrasado já perdeu utilidade.
+Os valores padrão do buffer são 120 segundos, 15 fps (`fps_buffer`) e JPEG qualidade 55 (`qualidade_buffer`). Os JPEGs substituem quadros BGR crus para reduzir a memória. `memoria_estimada_bytes` reporta a soma dos JPEGs e PCM guardados, sem a sobrecarga dos objetos Python.
 
-## 5. Pipeline de áudio
+## 7. Interface e segurança entre threads
 
-Captura: 16 bits assinados, mono, 44.100 Hz, blocos de 1.024 amostras (~23 ms). Cada bloco vai direto para a rede como `AUDIO`, sem compressão — em rede local, o custo (~700 kbps) é aceitável e elimina a latência de um codec.
+A janela de chamada atualiza vídeos periodicamente. Cada `VisualizadorVideo` recebe o quadro mais novo, e a renderização é feita na thread Tkinter. A janela também mantém uma visualização destacada opcional para outra janela.
 
-### Dois motores atrás de uma única interface
+O chat não coloca emojis diretamente em widgets como garantia de compatibilidade: `RenderizadorEmojis` tenta encontrar uma fonte de emoji do sistema, desenha com Pillow e insere uma imagem Tk. Se isso falhar, há fallback de texto e atalhos digitáveis. A checagem de suporte direto mede a fonte no Tk antes de confiar no caractere.
 
-`midia/captura_audio.py` não depende de uma biblioteca específica. O módulo detecta o motor em tempo de execução (`_detectar_motor()`) na ordem `sounddevice` → `pyaudio` → nenhum, e expõe `MOTOR_AUDIO`, `AUDIO_DISPONIVEL`, `MOTIVO_AUDIO_INDISPONIVEL` e `descrever_motor_audio()` para a interface.
+## 8. Configuração e persistência
 
-Cada motor é encapsulado em um adaptador privado que implementa a mesma interface mínima (`abrir`/`ler`/`fechar` na entrada, `abrir`/`escrever`/`fechar` na saída):
+`Configuracoes` agrega as seções `video`, `audio`, `rede`, `internet`, `gravacao` e `interface`, serializadas com JSON UTF-8. A leitura é tolerante a arquivo ausente ou JSON inválido: nesse caso os padrões são usados.
 
-| Papel | sounddevice | PyAudio |
-| --- | --- | --- |
-| Entrada | `_EntradaSounddevice` | `_EntradaPyAudio` |
-| Saída | `_SaidaSounddevice` | `_SaidaPyAudio` |
+Diretórios de dados:
 
-As classes públicas `CapturadorAudio` e `ReprodutorAudio` conhecem apenas essa interface, escolhida pelas fábricas `_criar_entrada()` / `_criar_saida()`. Acrescentar um terceiro motor exige apenas dois adaptadores novos e uma linha em cada fábrica — nenhuma outra camada muda.
+- Windows: `%APPDATA%\ScreenShare`
+- macOS: `~/Library/Application Support/ScreenShare`
+- Linux: `$XDG_CONFIG_HOME/screenshare` ou `~/.config/screenshare`
 
-O `sounddevice` é o preferencial porque distribui rodas prontas para o Python 3.13/3.14, enquanto o PyAudio ainda exige compilação nessas versões. O PyAudio permanece como alternativa automática para ambientes já configurados.
+A seção `internet` guarda servidor de sinalização, lista STUN, TURN, credenciais, `forcar_relay` e última sala. A seção `gravacao` guarda pasta, taxa de bits, duração e parâmetros do buffer.
 
-Se nenhum motor carregar (biblioteca ausente ou PortAudio não encontrado), `AUDIO_DISPONIVEL` fica `False`, o aplicativo registra um aviso e continua funcionando com vídeo e chat, com a interface exibindo o motivo exato.
+## 9. Servidor de sinalização e publicação
 
-### Mudo e surdo
+O servidor é independente do executável de desktop e depende apenas de `aiohttp`. Ele mantém salas em memória: quando o último participante sai, a sala é removida. O processo lê `PORT` automaticamente quando `--porta` não é informado.
 
-Os dois controles são independentes e resolvidos em camadas diferentes:
+```bash
+python -m pip install -r servidor_sinalizacao/requirements.txt
+python servidor_sinalizacao/servidor.py
+```
 
-- `Sessao.alternar_microfone()` interrompe o envio e **notifica o outro lado** com uma mensagem `ESTADO`, para que o rótulo remoto reflita o estado.
-- `Sessao.alternar_som()` é puramente local: `_despachar` simplesmente deixa de escrever no reprodutor enquanto `som_ativo` for `False`. Nada trafega na rede, o que torna o religamento instantâneo.
+Em desenvolvimento, os endpoints são `ws://127.0.0.1:8080/ws` e `http://127.0.0.1:8080/saude`. O diretório inclui `Dockerfile`, `render.yaml` e `fly.toml`; instruções adicionais estão em [../servidor_sinalizacao/README.md](../servidor_sinalizacao/README.md).
 
-Diferente da especificação original (áudio somente do host), o áudio é **bidirecional** — sem isso, uma conversa de suporte remoto exigiria uma segunda ferramenta de voz.
+## 10. Testes e empacotamento
 
-## 5.1. Prévia local da transmissão
+A suíte `unittest` cobre convite, sinalização, pares WebRTC, chamada, fontes, faixas, gravação, emojis, interface, mídia e o caminho TCP legado. A versão 2.0 possui 110 testes automatizados.
 
-`midia/previa.py` (`PreVisualizadorTela`) roda uma thread própria de captura, independente da `Sessao`. Essa separação é deliberada: o host precisa ver o que está transmitindo **desde o instante em que inicia o compartilhamento**, antes de qualquer espectador conectar — e a `Sessao` só existe depois do handshake.
+```bash
+ruff check .
+python -m compileall -q .
+xvfb-run -a -s "-screen 0 1280x800x24" python -m unittest discover -s testes -p "teste_*.py"
+```
 
-Para não competir com a transmissão, a prévia usa parâmetros reduzidos: 10 fps (`ConfiguracaoVideo.fps_previa`) e 640 px de largura (`LARGURA_PREVIA`), com a altura derivada da proporção real do monitor por `_calcular_dimensoes()`. Os quadros são entregues por callback e renderizados pela janela do host no mesmo `VisualizadorVideo` usado pelo espectador.
-
-## 5.2. Diagnóstico de rede
-
-`utilitarios/rede.py` concentra a lógica que responde à falha mais comum do projeto, o tempo esgotado:
-
-| Função | Responsabilidade |
-| --- | --- |
-| `listar_ips_locais()` | enumera os endereços da máquina como `EnderecoLocal` |
-| `_classificar()` | separa rede local, VPN, adaptador virtual, `127.0.0.1` e `169.254.x.x` |
-| `ip_local_recomendado()` | escolhe o endereço que o espectador realmente alcança |
-| `testar_alcance()` | tenta a conexão TCP e traduz o resultado em `ResultadoDiagnostico` |
-| `firewall_liberado()` / `liberar_firewall()` | consultam e criam a regra `netsh` no Windows |
-
-A classificação existe porque máquinas com VPN, Docker, WSL ou VirtualBox têm vários endereços, e sugerir o errado produz exatamente o tempo esgotado relatado. `169.254.x.x` (APIPA) é tratado como endereço inválido: indica ausência de DHCP.
-
-`nucleo/conexao.py` traduz cada exceção de socket em uma mensagem acionável distinta (tempo esgotado → firewall/IP, `ConnectionRefusedError` → host não está compartilhando, `gaierror` → endereço inválido), em vez de um erro genérico. `interface/janela_diagnostico.py` expõe tudo isso em uma janela, e a janela do espectador oferece abri-la automaticamente após uma falha.
-
-## 6. Ciclo de vida da sessão
-
-- `ServidorCompartilhamento` abre o socket de escuta, aceita conexões com tempo limite de 1 segundo (para permitir parada limpa), valida o handshake e cria a `Sessao`. Um segundo espectador é recusado com `HANDSHAKE_RECUSADO`; após a desconexão, a escuta é reaberta automaticamente.
-- `ClienteVisualizador` valida o endereço, conecta, faz o handshake e, em caso de queda, tenta reconectar segundo `tentativas_reconexao` e `intervalo_reconexao`.
-- `Sessao.encerrar` é idempotente: fecha a conexão, sinaliza as threads pelo evento de parada e libera os recursos de mídia.
-
-## 7. Configuração e persistência
-
-`configuracao/configuracoes.py` define dataclasses (`ConfiguracaoVideo`, `ConfiguracaoAudio`, `ConfiguracaoRede`, `ConfiguracaoInterface`) agregadas em `Configuracoes`, com `salvar()`/`carregar()` em JSON. Um arquivo corrompido não impede a inicialização: os padrões são restaurados e o erro é registrado.
-
-Diretórios por sistema operacional (`diretorio_dados()`): `%APPDATA%\ScreenShare` no Windows, `~/.config/screenshare` no Linux e `~/Library/Application Support/ScreenShare` no macOS.
-
-## 8. Registro de log
-
-`utilitarios/registro.py` configura um `RotatingFileHandler` (arquivo `screenshare.log`) e saída no console. O nível DEBUG é ativado por `--depurar`. Todos os módulos usam `obter_registrador(__name__)`, o que mantém a origem da mensagem rastreável.
-
-## 9. Estratégia de testes
-
-74 testes automatizados, todos executáveis sem monitor, placa de som ou rede externa:
-
-- **Unitários** — protocolo (empacotamento, tokens, JSON), mídia (JPEG, redimensionamento, qualidade adaptativa), configuração (padrões, persistência, arquivos corrompidos, validações), áudio (detecção de motor, captura, reprodução, descarte), rede (classificação de IPs, diagnóstico, firewall) e prévia local.
-- **Áudio com motor simulado** — como o PortAudio pode não existir no ambiente de CI, `teste_audio.py` injeta um módulo `sounddevice` falso em `sys.modules`. Isso testa os adaptadores sem placa de som e sem depender do motor real.
-- **Integração** — sobem um host e um espectador reais em `127.0.0.1`, com dublês para `Sessao._laco_video`, `_laco_audio` e `_iniciar_reproducao_audio`. Cobrem handshake, senha correta e incorreta, quadro de vídeo simulado, chat bidirecional, recusa do segundo espectador e limpeza após desconexão.
-
-Comando: `python -m unittest discover -s testes -p "teste_*.py" -v` (execute na raiz do projeto).
-
-## 10. Empacotamento
-
-O PyInstaller gera um único arquivo a partir de `build/screenshare.spec`, com `recursos/` embutido e `PIL._tkinter_finder` mais os back-ends do `mss` e o motor de áudio (`sounddevice`, `_sounddevice`, `cffi`, `pyaudio`) declarados como importações ocultas — sem isso, o executável falha ao iniciar. `utilitarios/recursos.py` resolve os caminhos usando `sys._MEIPASS`, funcionando tanto no código-fonte quanto no executável.
-
-Não há compilação cruzada: o `.exe` do Windows deve ser gerado no Windows e o binário Linux no Linux.
+`build/screenshare.spec` inclui recursos e importações ocultas para Tk/Pillow, `mss`, áudio e a cadeia WebRTC/PyAV. Como há extensões nativas, gere o executável Windows no Windows e o binário Linux no Linux. Os scripts de `build/` instalam dependências, executam os testes e chamam PyInstaller.
 
 ## 11. Pontos de extensão
 
 | Objetivo | Onde alterar |
 | --- | --- |
-| Novo codec de vídeo | `midia/compressao.py` (manter a assinatura de `comprimir_jpeg`/`descomprimir_jpeg`) |
-| Nova fonte de captura (janela específica) | `midia/captura_tela.py` |
-| Novo tipo de mensagem | `nucleo/protocolo.py` (novo valor em `TipoMensagem`) + tratamento em `nucleo/sessao.py` |
-| Múltiplos espectadores | `aplicacao/servidor.py` (lista de sessões) e o laço de envio em `nucleo/sessao.py` |
-| Criptografia do canal | envolver o socket em `nucleo/conexao.py` com `ssl.wrap_socket` |
-| Novo tema visual | `configuracao/configuracoes.py` (`TEMAS`) — a interface se adapta automaticamente |
+| Mudar servidores STUN/TURN padrão | `configuracao/configuracoes.py` e a montagem ICE em `nucleo/par_webrtc.py`. |
+| Acrescentar evento de sinalização | Cliente em `nucleo/sinalizacao.py`, roteamento em `servidor_sinalizacao/servidor.py` e tratamento em `nucleo/chamada.py`. |
+| Novo tipo de mensagem de chat/estado | Canal de dados em `nucleo/chamada.py` e apresentação em `interface/chat_rico.py`. |
+| Nova fonte de captura | `midia/fontes.py` e o contrato `FonteCaptura`. |
+| Novo destino de gravação ou codec | `midia/gravador.py`. |
+| Novo emoji ou atalho | Catálogo em `interface/emojis.py`. |
+| Evoluir o modo TCP | `nucleo/protocolo.py`, `nucleo/sessao.py` e `aplicacao/`. |

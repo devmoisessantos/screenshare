@@ -6,9 +6,11 @@ Uso típico (interface gráfica)::
 
 Modos diretos::
 
-    python principal.py --host                    # abre já como host
-    python principal.py --assistir 192.168.0.10   # abre já como espectador
-    python principal.py --host --console          # host sem interface gráfica
+    python principal.py --sala ABC123             # entra na sala pela internet
+    python principal.py --convite "screenshare://sala/ABC123?s=wss://..."
+    python principal.py --host                    # modo local: abre como host
+    python principal.py --assistir 192.168.0.10   # modo local: espectador
+    python principal.py --host --console          # host local sem interface
 """
 
 from __future__ import annotations
@@ -33,10 +35,22 @@ def construir_analisador() -> argparse.ArgumentParser:
     """Cria o analisador de argumentos da linha de comando."""
     analisador = argparse.ArgumentParser(
         prog="screenshare",
-        description=f"{NOME_APLICACAO} {VERSAO_APLICACAO} - compartilhamento de tela 1:1",
+        description=f"{NOME_APLICACAO} {VERSAO_APLICACAO} - chamadas de tela, voz e chat",
     )
     analisador.add_argument(
-        "--host", action="store_true", help="inicia diretamente no modo host"
+        "--sala", metavar="CODIGO", help="entra diretamente nesta sala (modo internet)"
+    )
+    analisador.add_argument(
+        "--convite", metavar="TEXTO", help="entra usando um link ou codigo de convite"
+    )
+    analisador.add_argument(
+        "--servidor-sinalizacao",
+        metavar="URL",
+        help="endereco do servidor de sinalizacao (exemplo: wss://exemplo/ws)",
+    )
+    analisador.add_argument("--apelido", help="nome exibido aos outros participantes")
+    analisador.add_argument(
+        "--host", action="store_true", help="modo local: inicia diretamente como host"
     )
     analisador.add_argument(
         "--assistir", metavar="IP", help="conecta diretamente ao host informado"
@@ -76,6 +90,31 @@ def aplicar_argumentos(configuracoes: Configuracoes, argumentos: argparse.Namesp
         configuracoes.video.fps = argumentos.fps
     if argumentos.sem_audio:
         configuracoes.audio.ativo = False
+    if argumentos.servidor_sinalizacao:
+        configuracoes.internet.servidor_sinalizacao = argumentos.servidor_sinalizacao
+    if argumentos.apelido:
+        configuracoes.interface.apelido = argumentos.apelido
+    if argumentos.convite:
+        _aplicar_convite(configuracoes, argumentos)
+
+
+def _aplicar_convite(configuracoes: Configuracoes, argumentos: argparse.Namespace) -> None:
+    """Interpreta o convite recebido na linha de comando."""
+    from nucleo.convite import ErroConvite, interpretar
+
+    try:
+        convite = interpretar(argumentos.convite)
+    except ErroConvite as erro:
+        print(f"Convite invalido: {erro}", file=sys.stderr)
+        return
+    argumentos.sala = convite.codigo
+    if convite.senha:
+        configuracoes.rede.senha = convite.senha
+        argumentos.senha = convite.senha
+    if convite.modo == "internet" and convite.servidor:
+        configuracoes.internet.servidor_sinalizacao = convite.servidor
+    elif convite.modo == "local" and convite.endereco:
+        argumentos.assistir = convite.endereco
 
 
 def executar_console(configuracoes: Configuracoes) -> int:
@@ -117,7 +156,18 @@ def executar_interface(configuracoes: Configuracoes, argumentos: argparse.Namesp
     from interface.janela_inicial import JanelaInicial
 
     janela = JanelaInicial(configuracoes)
-    if argumentos.host:
+    if argumentos.sala:
+        from interface.janela_chamada import JanelaChamada
+
+        chamada = JanelaChamada(
+            janela,
+            configuracoes,
+            "".join(argumentos.sala.upper().split()),
+            configuracoes.interface.apelido,
+            argumentos.senha or "",
+        )
+        janela._registrar(chamada)
+    elif argumentos.host:
         janela._abrir_servidor()
     elif argumentos.assistir:
         from interface.janela_cliente import JanelaCliente

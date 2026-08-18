@@ -268,19 +268,13 @@ class JanelaServidor(tk.Toplevel):
         ajuda.columnconfigure(0, weight=1)
 
         passos = (
-            "REDE LOCAL\n"
-            '1. Clique em "Iniciar compartilhamento".\n'
-            "2. Copie o endereço e envie ao espectador.\n"
-            '3. Na 1ª vez abra "Diagnóstico" e libere a porta no firewall.\n'
-            "4. O espectador cola o endereço e conecta.\n\n"
-            "ENTRE CIDADES / ESTADOS / PAÍSES (recomendado)\n"
-            "Use Tailscale ou ZeroTier nos dois PCs (mesma conta):\n"
-            "  → https://tailscale.com   ou   https://zerotier.com\n"
-            "Depois use o IP da VPN (ex.: 100.x.x.x) no lugar do IP local.\n"
-            "Assim não precisa abrir porta no roteador e o timed out some.\n\n"
-            "WebRTC (modo internet nativo) está em desenvolvimento.\n\n"
-            "Atalhos: Ctrl+S inicia/para · Ctrl+M microfone · "
-            "Ctrl+D som · Ctrl+Q sair"
+            '1. Clique em "Iniciar compartilhamento".'
+            "\n2. Copie o endereço acima e envie ao espectador."
+            "\n3. Na primeira vez, libere a porta no firewall pelo "
+            'botão "Diagnóstico".'
+            "\n4. O espectador abre o modo Assistir e cola o endereço."
+            "\n\nAtalhos: Ctrl+S inicia/para, Ctrl+M muta o microfone, "
+            "Ctrl+D desliga o som, Ctrl+Q fecha."
         )
         ttk.Label(
             ajuda,
@@ -340,27 +334,10 @@ class JanelaServidor(tk.Toplevel):
     # -- Ações da interface -------------------------------------------------
 
     def _copiar_endereco(self) -> None:
-        """Copia o convite completo (endereço + instruções) para a área de transferência."""
-        from utilitarios.convite import criar_convite
-
-        texto = self._var_endereco.get().strip()
-        endereco, _, porta_txt = texto.partition(":")
-        try:
-            porta = int(porta_txt) if porta_txt.isdigit() else self.configuracoes.rede.porta
-        except ValueError:
-            porta = self.configuracoes.rede.porta
-        convite = criar_convite(
-            endereco=endereco or texto,
-            porta=porta,
-            senha=self.configuracoes.rede.senha,
-        )
-        mensagem = convite.para_mensagem()
+        """Copia o endereço de conexão para a área de transferência."""
         self.clipboard_clear()
-        self.clipboard_append(mensagem)
-        self._chat.adicionar_sistema(
-            "Convite completo copiado (endereço + instruções). "
-            "Cole no WhatsApp/Discord e envie."
-        )
+        self.clipboard_append(self._var_endereco.get())
+        self._chat.adicionar_sistema("Endereço copiado para a área de transferência.")
 
     def _abrir_diagnostico(self) -> None:
         """Abre a janela de diagnóstico de rede."""

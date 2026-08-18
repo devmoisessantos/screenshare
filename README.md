@@ -1,124 +1,33 @@
-# ScreenShare 1.0
+# ScreenShare 2.0
 
-Aplicativo desktop de **compartilhamento de tela ponto a ponto (1:1)** com **áudio bidirecional** e **chat integrado**, escrito 100% em Python com código, comentários e documentação em português.
+Aplicativo desktop em Python para chamadas de voz, vídeo, compartilhamento de tela e chat. A versão 2.0 usa WebRTC para conectar participantes pela internet diretamente entre si, sem enviar a mídia pelo servidor de sinalização.
 
-Projeto acadêmico desenvolvido com foco em arquitetura limpa, modularização e facilidade de manutenção — uma alternativa leve ao compartilhamento de tela do Discord para conversas entre duas pessoas.
-
----
-
-## Telas
-
-| Menu principal | Janela do host |
-| --- | --- |
-| ![Menu principal](docs/imagens/inicial.png) | ![Janela do host](docs/imagens/servidor.png) |
-
-| Janela do espectador | Sessão ativa (vídeo + chat) |
-| --- | --- |
-| ![Janela do espectador](docs/imagens/cliente.png) | ![Sessão ativa](docs/imagens/sessao_ativa.png) |
-
----
-
-## Índice
-
-- [Telas](#telas)
-- [Recursos](#recursos)
-- [Arquitetura](#arquitetura)
-- [Instalação](#instalação)
-- [Como usar](#como-usar)
-- [Uso pela linha de comando](#uso-pela-linha-de-comando)
-- [Gerando o executável](#gerando-o-executável)
-- [Testes](#testes)
-- [Protocolo de comunicação](#protocolo-de-comunicação)
-- [Desempenho e rede](#desempenho-e-rede)
-- [Solução de problemas](#solução-de-problemas)
-- [Roteiro de evolução](#roteiro-de-evolução)
-- [Licença](#licença)
-
----
+O projeto, os nomes, os comentários e a documentação estão em português do Brasil. O modo TCP direto da versão anterior continua disponível como alternativa avançada de rede local.
 
 ## Recursos
 
-| Recurso | Descrição |
-| --- | --- |
-| Compartilhamento de tela | Captura via `mss`, compressão JPEG, 480p/720p/1080p, 15 a 60 fps |
-| Áudio bidirecional | Microfone dos dois lados (44,1 kHz, mono, 16 bits) via `sounddevice`, com PyAudio como alternativa |
-| Controles estilo Discord | Botões independentes de **mudo do microfone** e **desativar o som recebido**, com estado visual |
-| Prévia da transmissão | O host vê ao vivo o que está enviando, desde o início do compartilhamento |
-| Diagnóstico de rede | Lista os IPs da máquina, testa o alcance da porta e libera o firewall do Windows |
-| Chat | Mensagens instantâneas nos dois sentidos, com autor e horário |
-| Qualidade adaptativa | Reduz a qualidade JPEG e descarta quadros quando a latência sobe |
-| Segurança | Senha opcional (token SHA-256), limite de carga útil, sessão exclusiva |
-| Reconexão automática | O espectador tenta reconectar automaticamente após quedas |
-| Multimonitor | Seleção de monitor específico ou de toda a área de trabalho |
-| Estatísticas ao vivo | FPS, latência, qualidade, taxa de subida/descida e quadros descartados |
-| Temas | Escuro e claro, com preferências salvas em disco |
-| Atalhos | `Ctrl+S` iniciar/parar, `Ctrl+M` mudo do microfone, `Ctrl+D` desativar o som, `Ctrl+Q` sair |
-| Multiplataforma | Windows 10/11, Linux (Ubuntu 20.04+) e macOS |
+- Chamadas pela internet em **topologia de malha**: cada participante estabelece uma conexão WebRTC direta com os demais.
+- Até **6 participantes** por sala (`LIMITE_PARTICIPANTES`).
+- Sinalização por WebSocket, com servidor próprio incluído em `servidor_sinalizacao/`.
+- ICE/STUN para descoberta de rotas e TURN opcional para redes restritivas ou CGNAT.
+- Criação de sala por código de seis caracteres e convite por link `screenshare://`.
+- Áudio bidirecional, chat da sala e canal de controle por WebRTC.
+- Compartilhamento de toda a área de trabalho, de um monitor ou de uma janela específica.
+- Interface inspirada no Discord, com grade de vídeo, painel de participantes, avatar por iniciais, indicadores de microfone e tela, métricas e modo tela cheia.
+- Chat com seletor e atalhos de emojis. Os emojis são renderizados como imagens para contornar a limitação do Tcl/Tk 8.6 com caracteres fora de UCS-2.
+- Gravação local em MP4 e clipes a partir de buffer circular.
+- Modo TCP direto anterior preservado na aba **Rede local (avançado)**.
 
----
+## Requisitos
 
-## Arquitetura
+- Python **3.10 ou superior**.
+- Tkinter. No Ubuntu/Debian: `sudo apt install python3-tk`.
+- No Linux, PortAudio para o áudio: `sudo apt install libportaudio2`.
+- Em Linux, a seleção de janelas depende de `xdotool` ou `wmctrl`; instale um deles se quiser compartilhar uma janela específica.
 
-Modelo cliente-servidor sobre **TCP** (porta padrão **9999**): o **host** compartilha a tela, o **espectador** assiste.
-
-```
-        HOST (servidor)                              ESPECTADOR (cliente)
-  +-----------------------------+              +-----------------------------+
-  | captura_tela  -> compressao |==== VIDEO ==>| compressao -> visualizador  |
-  | captura_audio               |<=== AUDIO ==>|               reprodutor    |
-  | chat / estado / ping        |<=== CHAT ===>| chat / estado / pong        |
-  +-----------------------------+              +-----------------------------+
-              sessao.py (threads)                       sessao.py (threads)
-```
-
-Organização dos módulos:
-
-```
-screenshare/
-├── principal.py                 # Ponto de entrada e argumentos de linha de comando
-├── configuracao/
-│   └── configuracoes.py         # Dataclasses de configuração, temas e persistência JSON
-├── nucleo/
-│   ├── protocolo.py             # Formato dos quadros, tipos de mensagem, tokens
-│   ├── conexao.py               # Socket TCP com envio thread-safe e leitura exata
-│   └── sessao.py                # Orquestração das threads de vídeo, áudio, chat e ping
-├── midia/
-│   ├── captura_tela.py          # Captura multiplataforma (mss) e multimonitor
-│   ├── captura_audio.py         # Captura/reprodução (sounddevice ou PyAudio) com fila anti-latência
-│   ├── previa.py                # Pré-visualização local da própria transmissão
-│   └── compressao.py            # JPEG, conversões de cor e controlador adaptativo
-├── aplicacao/
-│   ├── servidor.py              # Host: escuta, handshake, autenticação, sessão
-│   └── cliente.py               # Espectador: conexão, handshake, reconexão automática
-├── interface/
-│   ├── tema.py                  # Estilos ttk (tema escuro/claro)
-│   ├── componentes.py           # Chat, estatísticas, visualizador e ponte de threads
-│   ├── janela_inicial.py        # Menu principal
-│   ├── janela_servidor.py       # Janela do host (prévia, controles de áudio, chat)
-│   ├── janela_cliente.py        # Janela do espectador
-│   └── janela_diagnostico.py    # Diagnóstico de rede, firewall e teste de porta
-├── utilitarios/
-│   ├── registro.py              # Log rotativo em arquivo e console
-│   ├── rede.py                  # IPs locais, diagnóstico de porta, firewall e validações
-│   └── recursos.py              # Ícones e caminhos dentro do executável
-├── testes/                      # 74 testes automatizados (unitários + integração)
-├── build/                       # Scripts de build, spec do PyInstaller e liberação do firewall
-└── recursos/                    # Ícones da aplicação
-```
-
-Cada camada tem uma responsabilidade única: rede não conhece interface, interface não conhece sockets, e a mídia é isolada em módulos substituíveis. Toda comunicação entre as threads de rede e a interface passa pela classe `PonteInterface`, que evita o uso concorrente (e inseguro) dos widgets do Tkinter.
-
----
+As dependências WebRTC e de mídia usam pacotes nativos. Para criar executáveis, faça o empacotamento no mesmo sistema operacional de destino.
 
 ## Instalação
-
-### Requisitos
-
-- Python 3.9 ou superior (testado até o 3.14)
-- Tkinter (no Ubuntu/Debian: `sudo apt install python3-tk`)
-- PortAudio, apenas para o áudio no Linux (`sudo apt install libportaudio2`). No Windows e no macOS o `sounddevice` já traz a biblioteca.
-
-### Passo a passo
 
 ```bash
 git clone https://github.com/<seu-usuario>/screenshare.git
@@ -130,240 +39,163 @@ python -m venv .venv
 # Linux/macOS
 source .venv/bin/activate
 
-pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 python principal.py
 ```
 
-#### Áudio: sounddevice, PyAudio ou nenhum
+O áudio prefere `sounddevice`; se ele não puder ser usado, o aplicativo tenta PyAudio quando já estiver instalado. Sem motor de áudio disponível, a aplicação continua com vídeo e chat.
 
-O áudio usa o **sounddevice**, escolhido por ter pacotes prontos para o Python 3.13/3.14 (o PyAudio ainda não os oferece). O projeto detecta o motor disponível em tempo de execução, nesta ordem:
+## Como fazer a primeira chamada pela internet
 
-1. `sounddevice` (preferencial, instalado pelo `requirements.txt`);
-2. `pyaudio` (alternativa automática, se já estiver instalado);
-3. nenhum: o aplicativo segue funcionando com vídeo e chat, e a interface informa o motivo.
+O código de sala **só funciona quando todos conseguem acessar o mesmo servidor de sinalização**. O servidor acompanha o repositório e pode ser executado localmente ou publicado em um serviço como Render, Fly.io ou Railway.
+
+1. Prepare um servidor de sinalização:
+   - para testar na mesma máquina, execute `python servidor_sinalizacao/servidor.py` e use `ws://127.0.0.1:8080/ws`;
+   - para pessoas em redes diferentes, publique a pasta `servidor_sinalizacao/`. As instruções, `Dockerfile`, `render.yaml` e `fly.toml` estão em [servidor_sinalizacao/README.md](servidor_sinalizacao/README.md).
+2. Abra o ScreenShare e informe o endereço WebSocket no campo **Servidor de sinalização**. Em hospedagem com HTTPS, o endereço normalmente é `wss://seu-dominio/ws`.
+3. Na aba **Chamada pela internet**, informe seu apelido e clique em **Criar sala e entrar**. O aplicativo gera um código quando o campo estiver vazio.
+4. Na janela da chamada, clique em **Copiar convite** e envie o texto para a outra pessoa.
+5. A outra pessoa abre o ScreenShare, cola o link `screenshare://...` no campo **Ou cole um convite**, clica em **Usar convite** e depois em **Entrar na sala**. Também é possível digitar o código, desde que o mesmo servidor de sinalização já esteja configurado.
+6. Depois que os pares estiverem conectados, clique em **Transmitir tela**, escolha a fonte e confirme.
+
+O servidor de sinalização apenas cria salas e encaminha oferta, resposta e candidatos ICE. Áudio, vídeo, tela e chat seguem por conexões WebRTC entre os participantes; a mídia nunca passa pelo servidor de sinalização.
+
+## Sem servidor nenhum: convite manual de SDP
+
+O núcleo inclui o formato de convite manual de SDP `SS1-`: ele compacta uma oferta ou resposta SDP com `zlib` e Base64 URL-safe. As funções `codificar_sdp()` e `decodificar_sdp()` estão em `nucleo/convite.py` e permitem transportar a negociação por qualquer mensageiro, sem servidor de sinalização.
+
+Use este caminho somente quando puder fazer a troca de oferta e resposta manualmente. A entrada principal da interface gráfica para chamadas pela internet usa o servidor de sinalização; portanto, para o fluxo comum por código de sala ou link, publique, aponte ou execute o servidor incluído.
+
+## Quando precisa de TURN (CGNAT)
+
+Na maior parte das redes domésticas, STUN e ICE encontram uma rota direta. Se a conexão direta falhar em uma operadora com CGNAT, em uma rede corporativa ou em uma rede que bloqueia UDP, configure um servidor TURN em **Ajustes**:
+
+1. Informe endereço, usuário e senha do TURN, por exemplo `turn:servidor:3478`.
+2. Tente a chamada novamente.
+3. Use `forcar_relay` apenas quando precisar obrigar o tráfego a passar pelo TURN ou durante diagnóstico.
+
+TURN pode retransmitir a mídia quando não há caminho direto. O servidor de sinalização do repositório não substitui um servidor TURN.
+
+## Uso da interface
+
+### Janela inicial
+
+- **Chamada pela internet**: cria ou entra em uma sala WebRTC. Configure servidor de sinalização, código, senha opcional e convite.
+- **Rede local (avançado)**: abre o modo TCP direto anterior como host ou espectador.
+- **Ajustes**: seleciona tema, servidor TURN, pasta de gravação e ativação automática do buffer de clipes.
+
+### Durante uma chamada
+
+- **Mutar microfone**: interrompe o envio do seu microfone e atualiza seu estado para os demais.
+- **Desligar som**: silencia localmente o áudio recebido.
+- **Transmitir tela**: abre o seletor de área de trabalho, monitor ou janela. Clique outra vez para parar de transmitir.
+- **Participantes**: exibe avatar com iniciais, estado da conexão e indicadores `mudo` e `tela`.
+- **Chat da sala**: envia mensagens e aceita atalhos como `:)`, `:(`, `<3`, `:fogo:`, `:ok:` e `:festa:`.
+- **Copiar convite** e **Ver convite**: compartilham o link da sala.
+- **Tela cheia (F11)**: alterna entre janela e tela cheia; `Esc` sai da tela cheia.
+- **Destacar transmissão**: abre o vídeo escolhido em outra janela quando esse controle estiver disponível na chamada.
+- **Métricas**: a barra inferior mostra pares conectados, taxa estimada e perdas reportadas pelas estatísticas WebRTC.
+
+Atalhos disponíveis:
+
+| Atalho | Ação |
+| --- | --- |
+| `Ctrl+M` | Mutar/desmutar o microfone |
+| `Ctrl+D` | Ligar/desligar o som recebido |
+| `Ctrl+S` | Abrir o seletor ou parar o compartilhamento |
+| `Ctrl+R` | Iniciar/parar a gravação local |
+| `Ctrl+G` | Salvar clipe recente |
+| `F11` | Tela cheia |
+| `Esc` | Sair da tela cheia |
+| `Ctrl+Q` | Encerrar a janela atual |
+
+## Gravação e clipes
+
+A gravação é local. O `GerenciadorGravacao` grava a imagem transmitida em MP4 e pode manter um buffer circular para exportar os últimos segundos como clipe.
+
+- Os arquivos vão, por padrão, para `Vídeos/ScreenShare` dentro da pasta pessoal, ou para a pasta escolhida em **Ajustes**.
+- O buffer padrão mantém **120 segundos**.
+- Para reduzir o consumo de memória, o buffer armazena JPEG a **15 fps** e qualidade **55** por padrão. Os campos persistidos são `fps_buffer` e `qualidade_buffer`.
+- O consumo efetivo guardado pelo buffer pode ser consultado por `memoria_estimada_bytes`.
+- Use `Ctrl+R` para iniciar/parar a gravação e `Ctrl+G` para salvar a duração de clipe configurada, que é 30 segundos por padrão.
+
+A gravação começa depois que houver um quadro local. O buffer pode ser ativado automaticamente ao transmitir, nas configurações.
+
+## Modo rede local avançado
+
+O modo antigo mantém a conexão TCP direta entre host e espectador. Ele é útil em uma LAN, mas **não atravessa NAT** e não resolve CGNAT. Para chamadas entre cidades ou redes domésticas diferentes, use a aba **Chamada pela internet** com sinalização WebRTC e, se necessário, TURN.
+
+No modo local, o host pode precisar liberar a porta TCP 9999 no firewall. O script `build/liberar_firewall_windows.bat` cria a regra de entrada no Windows quando executado como administrador.
+
+## Linha de comando
 
 ```bash
-# Preferencial (qualquer sistema)
-pip install sounddevice
-# Linux, se aparecer "PortAudio library not found"
-sudo apt install libportaudio2
-# Alternativa antiga (opcional)
-pip install PyAudio
+python principal.py
+python principal.py --sala ABC123 --servidor-sinalizacao wss://meu-servidor.exemplo/ws
+python principal.py --convite "screenshare://sala/ABC123?s=wss%3A%2F%2Fmeu-servidor.exemplo%2Fws"
+python principal.py --host
+python principal.py --assistir 192.168.0.10
+python principal.py --host --console
+python principal.py --versao
 ```
 
-A janela inicial e a janela do host mostram qual motor está em uso.
+## Gerar o executável no Windows
 
----
-
-## Como usar
-
-### Quem vai compartilhar a tela (host)
-
-1. Abra o aplicativo e clique em **Compartilhar minha tela (ser host)**.
-2. Ajuste apelido, porta, senha (opcional), monitor, resolução, fps e qualidade.
-3. Clique em **Iniciar compartilhamento**. A **prévia** à direita mostra exatamente o que está sendo transmitido.
-4. Clique em **Copiar** e envie o endereço (`IP:porta`) para a outra pessoa.
-5. Na primeira execução, abra **Diagnóstico** e clique em **Liberar porta no firewall** (veja abaixo).
-
-Durante a sessão, os botões **Microfone** e **Som** funcionam como no Discord: o primeiro silencia o que você envia; o segundo silencia o que você ouve. Os atalhos são `Ctrl+M` e `Ctrl+D`.
-
-### Quem vai assistir (espectador)
-
-1. Abra o aplicativo e clique em **Assistir a uma tela (ser espectador)**.
-2. Cole o endereço recebido no campo **IP do host** (aceita o formato `192.168.0.10:9999`).
-3. Informe a senha, se o host tiver definido uma, e clique em **Conectar**.
-4. Se a conexão falhar, o aplicativo oferece abrir o **Diagnóstico**, que testa a porta e explica exatamente qual é o problema.
-
-O chat e o microfone funcionam nos dois sentidos durante toda a sessão.
-
----
-
-## Uso pela linha de comando
-
-```bash
-python principal.py                            # abre o menu gráfico
-python principal.py --host                     # abre direto como host
-python principal.py --assistir 192.168.0.10    # abre direto como espectador
-python principal.py --host --console           # host sem interface gráfica
-python principal.py --host --resolucao 1080p --fps 30 --senha minhasenha
-python principal.py --sem-audio --depurar      # sem áudio, com log detalhado
-```
-
-Configurações e logs são gravados em:
-
-- Windows: `%APPDATA%\ScreenShare\`
-- Linux: `~/.config/screenshare/`
-- macOS: `~/Library/Application Support/ScreenShare/`
-
----
-
-## Gerando o executável
-
-O PyInstaller **não faz compilação cruzada**: gere o `.exe` no Windows e o binário Linux no Linux.
-
-### Windows (gera `dist\ScreenShare.exe`)
+O PyInstaller não faz compilação cruzada. Gere o `.exe` no Windows:
 
 ```bat
 build\gerar_executavel_windows.bat
 ```
 
-### Linux (gera `dist/ScreenShare`)
+O resultado é `dist\ScreenShare.exe`. O script cria ou reutiliza `.venv`, instala as dependências, executa os testes e chama `build/screenshare.spec`. As importações ocultas necessárias para aiortc, PyAV e suas dependências transitivas já estão declaradas no arquivo `.spec`.
+
+No Linux, use:
 
 ```bash
 bash build/gerar_executavel_linux.sh
 ```
 
-### Manualmente
+## Executar os testes
 
 ```bash
-pip install pyinstaller
-pyinstaller build/screenshare.spec --noconfirm --clean
+ruff check .
+python -m compileall -q .
+xvfb-run -a -s "-screen 0 1280x800x24" python -m unittest discover -s testes -p "teste_*.py"
 ```
 
-Os scripts criam o ambiente virtual, instalam as dependências, rodam os testes e empacotam tudo em um único arquivo (sem console, com ícone e recursos embutidos).
+A suíte usa `unittest` e possui 110 testes. O alvo `make testes` executa a descoberta padrão; `make sinalizacao` inicia o servidor local de sinalização.
 
----
+## Estrutura de pastas
 
-## Testes
-
-```bash
-python -m unittest discover -s testes -p "teste_*.py" -v
+```text
+screenshare/
+├── principal.py                  # Ponto de entrada e argumentos de linha de comando
+├── configuracao/                 # Preferências persistidas, rede, WebRTC e gravação
+├── nucleo/                       # Convites, sinalização, pares WebRTC e orquestração
+├── midia/                        # Fontes, faixas WebRTC, áudio e gravação
+├── interface/                    # Janelas Tkinter, vídeo, chat, emojis e participantes
+├── aplicacao/                    # Modo TCP direto legado
+├── servidor_sinalizacao/         # Serviço aiohttp, Docker e manifestos de publicação
+├── testes/                       # Testes unitários e de integração
+├── build/                        # Scripts e especificação do PyInstaller
+└── recursos/                     # Ícones da aplicação
 ```
 
-Cobertura dos testes (74 casos):
+Para detalhes das responsabilidades e dos fluxos, consulte [docs/ARQUITETURA.md](docs/ARQUITETURA.md).
 
-- `teste_protocolo.py` — empacotamento/desempacotamento, JSON, tokens e conexão TCP real
-- `teste_midia.py` — compressão JPEG, conversões, redimensionamento e qualidade adaptativa
-- `teste_configuracoes.py` — padrões, persistência, arquivos corrompidos e validações de rede
-- `teste_integracao.py` — handshake, senha correta/incorreta, chat bidirecional, vídeo, sessão exclusiva, desconexão e controles de áudio
-- `teste_audio.py` — detecção de motor, captura, reprodução, descarte de blocos e ausência total de áudio (motores simulados)
-- `teste_rede.py` — classificação de IPs, teste de alcance de porta e mensagens de diagnóstico
-- `teste_previa.py` — dimensões reduzidas, entrega de quadros e falha de captura da prévia
+## Limitações honestas
 
-Os testes de integração usam dublês para captura de tela e áudio, portanto rodam em qualquer ambiente (inclusive em CI sem monitor nem placa de som).
-
----
-
-## Protocolo de comunicação
-
-Cada quadro transmitido no socket segue o formato:
-
-```
-+----------+--------+-------------+-----------------+
-| 2 bytes  | 1 byte |   4 bytes   |    N bytes      |
-|  "SS"    |  tipo  |  tamanho N  |   carga útil    |
-+----------+--------+-------------+-----------------+
-```
-
-Tipos de mensagem:
-
-| Código | Tipo | Carga útil |
-| --- | --- | --- |
-| 1 / 2 / 3 | `HANDSHAKE_PEDIDO` / `ACEITO` / `RECUSADO` | JSON com versão, apelido e token |
-| 4 | `PRONTO` | vazia |
-| 10 | `VIDEO` | quadro JPEG |
-| 11 | `AUDIO` | bloco PCM 16 bits |
-| 20 | `CHAT` | JSON `{autor, conteudo, horario}` |
-| 30 / 31 | `PING` / `PONG` | JSON `{t}` para medir latência |
-| 40 | `ESTADO` | JSON com mudanças (ex.: microfone) |
-| 50 | `ENCERRAR` | JSON `{motivo}` |
-
-Fluxo de conexão:
-
-```
-Espectador -> Host: HANDSHAKE_PEDIDO (versão + apelido + token SHA-256)
-Host -> Espectador: HANDSHAKE_ACEITO (resolução, fps, áudio) ou HANDSHAKE_RECUSADO
-Espectador -> Host: PRONTO
-Host -> Espectador: fluxo contínuo de VIDEO/AUDIO; ambos trocam CHAT/PING/PONG
-```
-
-Segurança implementada: senha convertida em token SHA-256, comparação resistente a ataques de tempo (`hmac.compare_digest`), limite de 10 MB por carga útil, uma sessão exclusiva por vez e validação estrita do prefixo mágico e dos tipos de mensagem.
-
----
-
-## Desempenho e rede
-
-| Configuração | Banda de subida | Observação |
-| --- | --- | --- |
-| 480p @ 30 fps | ~1,5–3 Mbps | ideal para internet doméstica |
-| 720p @ 30 fps | ~3–5 Mbps | padrão recomendado |
-| 1080p @ 30 fps | ~8–12 Mbps | ideal para rede local |
-| Áudio (por lado) | ~700 kbps | 44,1 kHz, mono, 16 bits |
-
-- Uso de CPU no host: ~20–35% em um i5 moderno (captura + compressão).
-- Latência esperada em rede local: abaixo de 200 ms; medida ao vivo pelo `PING`/`PONG`.
-- Acima de 200 ms a qualidade JPEG cai automaticamente; acima de 400 ms quadros são descartados para manter o tempo real.
-
-### Uso pela internet
-
-1. Libere a porta 9999/TCP no firewall do host, ou
-2. **Recomendado:** use uma VPN ponto a ponto como [Tailscale](https://tailscale.com/) ou [ZeroTier](https://www.zerotier.com/) e informe o IP da VPN — assim não é necessário abrir portas no roteador.
-
-No Windows, a primeira execução pode exibir o alerta do Firewall: escolha **Permitir acesso** em redes privadas.
-
----
-
-## Solução de problemas
-
-| Sintoma | Causa provável | Solução |
-| --- | --- | --- |
-| `Tkinter não está disponível` | Python sem Tk | `sudo apt install python3-tk` |
-| `Áudio indisponível` na interface | sounddevice/PortAudio ausente | `pip install sounddevice` e, no Linux, `sudo apt install libportaudio2` |
-| `Não foi possível escutar na porta 9999` | porta ocupada | mude a porta na interface ou use `--porta 9100` |
-| `Tempo esgotado` ao conectar | firewall do host bloqueando a porta, ou IP errado | veja a seção **Erro de tempo esgotado** abaixo |
-| `O host recusou a conexão` | o host ainda não clicou em Iniciar compartilhamento | inicie o compartilhamento no host e confira a porta |
-| Espectador não conecta | firewall ou IP externo | libere a porta ou use Tailscale/ZeroTier |
-| `Senha incorreta` | senhas diferentes nos dois lados | confira o campo Senha em ambos |
-| Tela preta no espectador | monitor errado selecionado | escolha outro monitor na lista |
-| Vídeo travando | banda insuficiente | reduza a resolução/fps ou mantenha a qualidade adaptativa ligada |
-| Falha de captura no macOS | permissão do sistema | Ajustes → Privacidade → Gravação de Tela |
-| Falha de captura no Linux/Wayland | mss requer X11 | inicie a sessão em Xorg |
-
-### Erro de tempo esgotado (o mais comum)
-
-"Tempo esgotado" significa que o pacote do espectador **não chegou** ao aplicativo do host. A ordem de verificação é sempre a mesma:
-
-1. **Firewall do Windows.** É a causa mais frequente. No host, clique com o botão direito em `build/liberar_firewall_windows.bat` e escolha **Executar como administrador** (ou use o botão **Liberar porta no firewall** dentro do **Diagnóstico**). O script cria a regra:
-
-   ```bat
-   netsh advfirewall firewall add rule name="ScreenShare 9999" dir=in action=allow protocol=TCP localport=9999
-   ```
-
-2. **Endereço IP errado.** Se o host tiver VPN (Tailscale, ZeroTier), Docker, VirtualBox ou WSL, o endereço padrão pode ser de um adaptador virtual inalcançável. Abra **Diagnóstico → Meus endereços** e use o endereço marcado como **rede local (recomendado)**.
-
-3. **Redes diferentes.** As duas máquinas precisam estar na mesma rede local. Wi-Fi de visitantes e isolamento de clientes (AP isolation) bloqueiam a conexão. Pela internet, use Tailscale/ZeroTier nas duas pontas.
-
-4. **Antivírus.** Alguns antivírus bloqueiam conexões de entrada mesmo com a regra do firewall criada; adicione uma exceção para o `ScreenShare.exe`.
-
-Para confirmar rapidamente onde está o problema, use **Diagnóstico → Testar conexão**: "recusada" indica que a rede está boa e falta iniciar o compartilhamento; "tempo esgotado" indica bloqueio ou endereço errado.
-
-No Linux, libere a porta com `sudo ufw allow 9999/tcp`.
-
-Logs detalhados: `~/.config/screenshare/screenshare.log` (Linux) ou `%APPDATA%\ScreenShare\screenshare.log` (Windows). Use `--depurar` para o nível DEBUG.
-
----
-
-## Roteiro de evolução
-
-- [ ] Codec H.264 (via PyAV) para reduzir consumo de banda
-- [ ] Compartilhamento de janela específica, não apenas do monitor inteiro
-- [ ] Envio de arquivos pelo chat
-- [ ] Suporte a mais de um espectador simultâneo
-- [ ] Controle remoto do mouse e teclado (com autorização)
-- [ ] Criptografia TLS do canal (atualmente apenas autenticação por token)
-- [ ] Gravação local da sessão em vídeo
-
----
+- Uma sala aceita no máximo seis participantes e usa malha: cada participante envia mídia diretamente para os demais, aumentando o consumo de banda de subida conforme entram pessoas.
+- Código de sala e link de convite pela internet exigem um servidor de sinalização acessível. Publique o servidor incluído gratuitamente em Render, Fly.io ou Railway, ou execute-o em uma máquina acessível. Sem isso, use a troca manual de SDP `SS1-`.
+- Redes em CGNAT muito restritas, redes corporativas ou redes que bloqueiam UDP podem exigir um TURN configurado pelo usuário.
+- O servidor de sinalização não transporta mídia e não funciona como TURN.
+- A seleção de janelas depende dos recursos do sistema operacional e, no Linux, de `xdotool` ou `wmctrl`.
+- A captura de tela no Linux costuma exigir uma sessão X11 compatível com `mss`; em Wayland pode haver limitações.
+- A gravação requer PyAV e um codec de vídeo compatível no ambiente.
 
 ## Licença
 
-Distribuído sob a licença MIT — consulte o arquivo [LICENSE](LICENSE).
+Distribuído sob a licença MIT. Consulte [LICENSE](LICENSE).
 
-Desenvolvido por **Moises M Santos** — Goiânia/GO, Brasil.
-
----
-
-## Documentação adicional
-
-- [docs/ARQUITETURA.md](docs/ARQUITETURA.md) — camadas, modelo de threads, pipelines de vídeo/áudio, decisões de projeto e pontos de extensão.
-- [CHANGELOG.md](CHANGELOG.md) — histórico de versões.
+Desenvolvido por **Moises M Santos**, Goiânia/GO, Brasil.

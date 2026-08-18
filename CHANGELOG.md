@@ -3,31 +3,50 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 o projeto segue o [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
-## [1.2.0-dev] - 2026-08-18
+## [2.0.0] - 2026-08-18
 
 ### Adicionado
-- **Camada de transporte** (`nucleo/transporte/`) preparada para dual mode:
-  TCP (local/VPN) + WebRTC (internet).
-- Módulo `utilitarios/convite.py`: geração e interpretação de convites
-  (`IP:porta`, `screenshare://...` e mensagem completa para WhatsApp/Discord).
-- **Gravação local de sessão** (`midia/gravacao/`): base do gravador com
-  OpenCV (VideoWriter), pasta de gravações e estados (parado/gravando).
-- Guia de conexão completo em `docs/CONEXAO.md` (rede local, Tailscale,
-  ZeroTier e roadmap WebRTC).
-- Dependência opcional `webrtc` no `pyproject.toml` (`aiortc` + `aiohttp`).
-- Texto de ajuda do host atualizado com instruções claras de Tailscale/ZeroTier
-  para conexão entre estados/países.
-- Botão "Copiar" do host agora copia o **convite completo** (endereço +
-  instruções anti-timed-out).
-- Campo de endereço do espectador aceita link `screenshare://` e extrai
-  senha automaticamente quando presente no convite.
-- Configuração `modo_transporte` e `sinalizacao_url` em `ConfiguracaoRede`.
+- **Chamadas pela internet com WebRTC** (`aiortc`) em topologia de malha, com
+  áudio, vídeo, compartilhamento de tela e chat diretos entre os participantes.
+  A sala aceita até seis participantes (`LIMITE_PARTICIPANTES`).
+- Negociação ICE com servidores STUN e campos opcionais para TURN, inclusive a
+  preferência `forcar_relay` para redes restritivas ou diagnóstico.
+- Servidor próprio de sinalização em `servidor_sinalizacao/`, baseado em
+  `aiohttp`, com WebSocket em `GET /ws`, verificação em `GET /saude`,
+  `Dockerfile`, `render.yaml` e `fly.toml` para auto-hospedagem.
+- Entrada por código de sala e por link `screenshare://`, além da troca manual
+  de SDP sem infraestrutura, codificada com o prefixo `SS1-`.
+- Seletor de fonte com área de trabalho inteira, monitor específico ou janela
+  específica, incluindo miniaturas e atualização da lista de janelas.
+- Nova janela de chamada inspirada no Discord: grade de vídeo, painel de
+  participantes, chat com emojis renderizados como imagens, métricas, tela
+  cheia e destaque de uma transmissão em outra janela.
+- Gravação local em MP4 e clipes a partir de buffer circular. O padrão do
+  buffer é 120 segundos, 15 fps e JPEG com qualidade 55; os atalhos são
+  `Ctrl+R` para gravar e `Ctrl+G` para salvar um clipe.
+- Novos testes de WebRTC, sinalização, convites, fontes, gravação, emojis e
+  interface, totalizando 110 testes automatizados.
 
-### Em andamento
-- Integração completa do modo WebRTC (sinalização + tracks de vídeo/áudio).
-- UI de seleção de modo (TCP / WebRTC / Tailscale).
-- Clipagem dos últimos minutos e botão de gravar na interface.
-- Controles e visual mais próximos do Discord.
+### Alterado
+- O modo principal agora é **Chamada pela internet**. O transporte TCP direto
+  anterior foi preservado na aba **Rede local (avançado)**, indicada apenas
+  para máquinas na mesma rede e sem travessia de NAT.
+- A mídia passou a usar faixas WebRTC e `MediaRelay`, permitindo reutilizar a
+  captura local entre pares, prévia e gravação.
+- As configurações persistidas passaram a incluir servidor de sinalização,
+  STUN/TURN, preferências de gravação e buffer de clipes.
+
+### Corrigido
+- Transceptores WebRTC passaram a ser reservados antes da oferta e forçados a
+  `sendrecv` no participante que responde, corrigindo o caso em que a tela
+  nunca chegava ao outro participante.
+- O envio de chat passou a ser agendado no laço `asyncio`; antes ele podia
+  falhar com `no current event loop`.
+- O vídeo volta a ser desenhado ao redimensionar a janela.
+- O buffer de clipes passou a consumir menos RAM ao guardar JPEGs em FPS e
+  qualidade reduzidos.
+- A medição da fonte de emoji no Tk foi ajustada para evitar falhas de
+  renderização.
 
 ## [1.1.0] - 2026-08-18
 

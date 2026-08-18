@@ -25,7 +25,6 @@ from midia.captura_audio import AUDIO_DISPONIVEL, descrever_motor_audio
 from midia.compressao import ErroCompressao, bgr_para_rgb, descomprimir_jpeg
 from nucleo.sessao import Retornos
 from utilitarios.recursos import aplicar_icone
-from utilitarios.convite import interpretar_convite
 from utilitarios.rede import separar_endereco_porta
 from utilitarios.registro import obter_registrador
 
@@ -155,31 +154,19 @@ class JanelaCliente(tk.Toplevel):
 
     def _conectar(self) -> None:
         """Coleta os dados do formulário e conecta em uma thread separada."""
-        texto = self._var_endereco.get().strip()
-        if not texto:
+        endereco = self._var_endereco.get().strip()
+        if not endereco:
             messagebox.showwarning(
-                "Endereço obrigatório",
-                "Informe o IP do host, o endereço IP:porta ou cole o link de convite.",
-                parent=self,
+                "Endereço obrigatório", "Informe o IP do host.", parent=self
             )
             return
 
-        # Aceita IP, IP:porta, screenshare://... e texto de convite.
+        # Aceita o formato "ip:porta" colado diretamente do host.
         try:
             porta_atual = int(self._var_porta.get())
         except ValueError:
             porta_atual = self.configuracoes.rede.porta
-
-        try:
-            convite = interpretar_convite(texto, porta_padrao=porta_atual)
-            endereco = convite.endereco
-            porta_detectada = convite.porta
-            if convite.senha and not self._var_senha.get().strip():
-                self._var_senha.set(convite.senha)
-        except ValueError:
-            endereco, porta_detectada = separar_endereco_porta(texto, porta_atual)
-
-        self._var_endereco.set(endereco)
+        endereco, porta_detectada = separar_endereco_porta(endereco, porta_atual)
         self._var_porta.set(str(porta_detectada))
 
         self.configuracoes.interface.apelido = self._var_apelido.get().strip() or "Espectador"

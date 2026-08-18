@@ -1,6 +1,6 @@
 @echo off
 REM ===================================================================
-REM  ScreenShare 1.0 - Geracao do executavel para Windows 10/11
+REM  ScreenShare 2.0 - Geracao do executavel para Windows 10/11
 REM  Uso: dar duplo clique neste arquivo ou executar no Prompt:
 REM       build\gerar_executavel_windows.bat
 REM  Resultado: dist\ScreenShare.exe
@@ -26,13 +26,7 @@ call .venv\Scripts\activate.bat || goto :erro
 
 echo [3/5] Instalando dependencias...
 python -m pip install --upgrade pip >nul
-python -m pip install -r requirements.txt
-if errorlevel 1 (
-    echo.
-    echo AVISO: alguma dependencia falhou. Tentando sem o audio...
-    python -m pip install mss opencv-python numpy pillow || goto :erro
-    echo O aplicativo funcionara sem audio ate o sounddevice ser instalado.
-)
+python -m pip install -r requirements.txt || goto :erro
 python -m pip install pyinstaller || goto :erro
 
 echo [4/5] Executando os testes automatizados...

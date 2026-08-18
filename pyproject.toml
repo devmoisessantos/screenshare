@@ -1,31 +1,33 @@
 [project]
 name = "screenshare"
-version = "1.2.0"
-description = "Compartilhamento de tela ponto a ponto com áudio, chat e modos TCP + WebRTC"
+version = "2.0.0"
+description = "Chamadas WebRTC em malha com compartilhamento de tela, áudio, chat e gravação local"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "Moises M Santos" }]
-keywords = ["compartilhamento de tela", "screen sharing", "tkinter", "sockets", "webrtc", "python"]
+keywords = ["compartilhamento de tela", "webrtc", "tkinter", "sinalização", "python"]
 dependencies = [
     "mss>=9.0.1",
     "opencv-python>=4.8",
     "numpy>=1.24",
     "pillow>=10.0",
+    "aiortc>=1.15.0",
+    "av>=17.1.0",
+    "aiohttp>=3.14.3",
 ]
 
 [project.optional-dependencies]
 audio = ["sounddevice>=0.4.6"]
 # Alternativa para ambientes antigos, caso o PortAudio nao esteja disponivel.
 audio-legado = ["PyAudio>=0.2.13"]
-webrtc = ["aiortc>=1.9.0", "aiohttp>=3.9.0"]
 dev = ["pyinstaller>=6.0", "ruff>=0.6"]
 
 [project.scripts]
 screenshare = "principal:principal"
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 95
 exclude = [".venv", "build", "dist"]
 
@@ -36,8 +38,10 @@ select = ["E", "F", "I", "UP", "B", "C4", "SIM"]
 # operacional e a
 # aplicação precisa degradar de forma elegante em vez de encerrar.
 # SIM105 (`contextlib.suppress`) fica desativado por legibilidade: em um projeto
-# didático o bloco `try/except` explícito comunica melhor a intenção.
-ignore = ["B008", "BLE001", "S110", "E501", "SIM105"]
+# didático o bloco `try/except` explícito comunica melhor a intenção. UP035 e
+# UP041 são mantidas no modo TCP legado para evitar alterações em módulos fora
+# do escopo da atualização de documentação e empacotamento.
+ignore = ["B008", "BLE001", "S110", "E501", "SIM105", "UP035", "UP041"]
 
 [tool.ruff.lint.per-file-ignores]
 "testes/*" = ["S101"]

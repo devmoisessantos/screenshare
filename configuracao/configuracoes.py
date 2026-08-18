@@ -24,7 +24,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 NOME_APLICACAO = "ScreenShare"
-VERSAO_APLICACAO = "1.2.0-dev"
+VERSAO_APLICACAO = "2.0.0"
 
 #: Resoluções suportadas para o compartilhamento de tela.
 RESOLUCOES: dict[str, tuple[int, int]] = {
@@ -106,6 +106,63 @@ class ConfiguracaoAudio:
     dispositivo_saida: int | None = None
 
 
+#: Servidores STUN publicos usados para descobrir o endereco externo da
+#: maquina. Sao gratuitos e nao transportam audio nem video: apenas informam
+#: "como o mundo te ve", o que permite a conexao direta atravessar o NAT.
+SERVIDORES_STUN_PADRAO: tuple[str, ...] = (
+    "stun:stun.l.google.com:19302",
+    "stun:stun1.l.google.com:19302",
+    "stun:stun.cloudflare.com:3478",
+)
+
+#: Numero maximo de pessoas em uma sala. A malha (cada um conectado a todos)
+#: e simples e sem servidor de midia, mas o custo cresce rapido: seis e o
+#: limite pratico para uma conexao domestica.
+LIMITE_PARTICIPANTES = 6
+
+
+@dataclass
+class ConfiguracaoInternet:
+    """Parametros do modo internet (WebRTC).
+
+    O modo internet dispensa liberar portas no firewall e funciona entre
+    cidades ou paises: a conexao e negociada por um servidor de sinalizacao
+    (que so troca mensagens de encontro) e o audio/video vai direto de um
+    computador ao outro. Quando o NAT e restritivo demais (CGNAT de operadora,
+    por exemplo), um servidor TURN opcional retransmite o trafego.
+    """
+
+    servidor_sinalizacao: str = ""
+    servidores_stun: list[str] = field(
+        default_factory=lambda: list(SERVIDORES_STUN_PADRAO)
+    )
+    turn_url: str = ""
+    turn_usuario: str = ""
+    turn_senha: str = ""
+    #: Forca todo o trafego pelo TURN. Util para diagnosticar ou para redes
+    #: corporativas que bloqueiam UDP direto.
+    forcar_relay: bool = False
+    #: Ultima sala usada, apenas para preencher a interface.
+    ultima_sala: str = ""
+
+
+@dataclass
+class ConfiguracaoGravacaoLocal:
+    """Preferencias de gravacao de tela e de clipes."""
+
+    pasta: str = ""
+    taxa_bits: int = 4_000_000
+    #: Buffer circular usado pelo botao de clipe (estilo Medal).
+    segundos_buffer: int = 120
+    #: FPS e qualidade JPEG do buffer. Valores menores que os da captura para
+    #: manter a memoria em poucas centenas de MiB durante longas sessoes.
+    fps_buffer: int = 15
+    qualidade_buffer: int = 55
+    #: Duracao padrao do clipe salvo pelo atalho.
+    segundos_clipe: int = 30
+    buffer_automatico: bool = False
+
+
 @dataclass
 class ConfiguracaoRede:
     """Parâmetros de rede e segurança da conexão."""
@@ -118,10 +175,6 @@ class ConfiguracaoRede:
     tentativas_reconexao: int = 3
     intervalo_reconexao: float = 3.0
     tamanho_maximo_carga: int = TAMANHO_MAXIMO_CARGA
-    #: Modo de transporte preferido: "tcp" (local/VPN) ou "webrtc" (internet).
-    modo_transporte: str = "tcp"
-    #: URL de um servidor de sinalização WebRTC (vazio = ainda não configurado).
-    sinalizacao_url: str = ""
 
 
 @dataclass
@@ -131,6 +184,9 @@ class ConfiguracaoInterface:
     tema: str = "escuro"
     apelido: str = ""
     mostrar_estatisticas: bool = True
+    #: Modo preferido ao abrir o aplicativo: "internet" ou "local".
+    modo_preferido: str = "internet"
+    volume_saida: float = 1.0
 
     def __post_init__(self) -> None:
         if not self.apelido:
@@ -147,6 +203,10 @@ class Configuracoes:
     video: ConfiguracaoVideo = field(default_factory=ConfiguracaoVideo)
     audio: ConfiguracaoAudio = field(default_factory=ConfiguracaoAudio)
     rede: ConfiguracaoRede = field(default_factory=ConfiguracaoRede)
+    internet: ConfiguracaoInternet = field(default_factory=ConfiguracaoInternet)
+    gravacao: ConfiguracaoGravacaoLocal = field(
+        default_factory=ConfiguracaoGravacaoLocal
+    )
     interface: ConfiguracaoInterface = field(default_factory=ConfiguracaoInterface)
 
     # -- Serialização -------------------------------------------------------
@@ -235,5 +295,8 @@ ATALHOS: dict[str, str] = {
     "<Control-m>": "Ativar/desativar o microfone",
     "<Control-d>": "Ativar/desativar o som recebido",
     "<Control-s>": "Iniciar/parar o compartilhamento",
+    "<Control-r>": "Iniciar/parar a gravacao",
+    "<Control-g>": "Salvar um clipe dos ultimos segundos",
     "<Control-Return>": "Enviar mensagem do chat",
+    "<F11>": "Tela cheia",
 }

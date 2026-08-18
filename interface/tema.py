@@ -148,4 +148,55 @@ def aplicar_tema(janela: tk.Misc, nome_tema: str = "escuro") -> dict[str, str]:
         "TScale", background=paleta["fundo"], troughcolor=paleta["fundo_campo"]
     )
     estilo.configure("TSeparator", background=paleta["fundo_campo"])
+
+    # Abas: o tema clam usa cinza claro com texto escuro, ilegivel no escuro.
+    estilo.configure("TNotebook", background=paleta["fundo"], borderwidth=0)
+    estilo.configure(
+        "TNotebook.Tab",
+        background=paleta["fundo_painel"],
+        foreground=paleta["texto_secundario"],
+        padding=(14, 8),
+        borderwidth=0,
+    )
+    estilo.map(
+        "TNotebook.Tab",
+        background=[("selected", paleta["fundo_campo"]), ("active", paleta["fundo_campo"])],
+        foreground=[("selected", paleta["texto"]), ("active", paleta["texto"])],
+    )
+
+    # Estilos usados pela interface de chamada (modo internet).
+    estilo.configure("Barra.TFrame", background=paleta["fundo_painel"])
+    estilo.configure("Cartao.TFrame", background=paleta["fundo_campo"])
+    estilo.configure(
+        "Cartao.TLabel",
+        background=paleta["fundo_campo"],
+        foreground=paleta["texto"],
+    )
+    estilo.configure(
+        "CartaoSecundario.TLabel",
+        background=paleta["fundo_campo"],
+        foreground=paleta["texto_secundario"],
+    )
+    estilo.configure(
+        "Sucesso.TButton", background=paleta["sucesso"], foreground="#ffffff"
+    )
+    estilo.map("Sucesso.TButton", background=[("active", paleta["sucesso"])])
+    estilo.configure(
+        "Barra.TButton",
+        background=paleta["fundo_campo"],
+        foreground=paleta["texto"],
+        padding=(10, 8),
+    )
+    estilo.map("Barra.TButton", background=[("active", paleta["destaque"])])
+    estilo.configure(
+        "Painel.TCheckbutton",
+        background=paleta["fundo_painel"],
+        foreground=paleta["texto"],
+        focuscolor=paleta["fundo_painel"],
+    )
+    estilo.configure(
+        "Painel.TScale",
+        background=paleta["fundo_painel"],
+        troughcolor=paleta["fundo_campo"],
+    )
     return paleta

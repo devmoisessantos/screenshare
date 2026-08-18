@@ -1,0 +1,14 @@
+# Publicacao em um clique no Render (plano gratuito).
+# Suba este projeto em um repositorio Git e aponte o Render para este arquivo.
+services:
+  - type: web
+    name: screenshare-sinalizacao
+    runtime: python
+    plan: free
+    rootDir: servidor_sinalizacao
+    buildCommand: pip install -r requirements.txt
+    startCommand: python servidor.py --host 0.0.0.0 --porta $PORT
+    healthCheckPath: /saude
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"

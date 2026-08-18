@@ -1,10 +1,10 @@
 @echo off
 REM ===================================================================
-REM  ScreenShare 1.0 - Liberacao da porta no Firewall do Windows
+REM  ScreenShare 2.0 - Liberacao da porta no Firewall do Windows
 REM
-REM  Este e o passo que resolve o erro "tempo esgotado / timed out"
-REM  no espectador: sem a regra, o Windows descarta silenciosamente a
-REM  conexao antes que ela chegue ao aplicativo.
+REM  Usado somente pelo modo "Rede local (avancado)" (TCP direto).
+REM  Chamadas WebRTC pela internet usam sinalizacao e normalmente nao exigem
+REM  liberar esta porta TCP.
 REM
 REM  COMO USAR: clique com o botao direito neste arquivo e escolha
 REM             "Executar como administrador".
